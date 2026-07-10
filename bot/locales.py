@@ -69,8 +69,8 @@ _t = {
         # Reply
         "reply_owner_header": "💬 <b>Ответ от владельца ссылки:</b>",
         "reply_sender_header": "💬 <b>Ответ от анонимного отправителя:</b>",
-        "reply_sent_owner": "✅ Ответ отправлен анонимному отправителю!",
-        "reply_sent_sender": "✅ Ответ отправлен владельцу ссылки!",
+        "reply_sent": "✅ Сообщение отправлено анонимно!",
+        "reply_quote_you": "📎 Вы писали:",
         "original_not_found": "Оригинальное сообщение не найдено.",
         "link_not_found": "Ссылка не найдена.",
 
@@ -280,8 +280,8 @@ _t = {
         # Reply
         "reply_owner_header": "💬 <b>Reply from link owner:</b>",
         "reply_sender_header": "💬 <b>Reply from anonymous sender:</b>",
-        "reply_sent_owner": "✅ Reply sent to anonymous sender!",
-        "reply_sent_sender": "✅ Reply sent to link owner!",
+        "reply_sent": "✅ Message sent anonymously!",
+        "reply_quote_you": "📎 You wrote:",
         "original_not_found": "Original message not found.",
         "link_not_found": "Link not found.",
 

@@ -84,6 +84,7 @@ class ForwardedMessage(Base):
     bot_message_id = Column(Integer, nullable=False)
     owner_tg_id = Column(BigInteger, nullable=False)
     original_msg_id = Column(Integer, ForeignKey("messages.id"), nullable=False)
+    reply_text = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
@@ -108,6 +109,7 @@ async def init_db():
     # ── Migration: add missing columns for existing DBs ──
     migrations = [
         ("users", "language", "VARCHAR(5) DEFAULT 'ru'"),
+        ("forwarded_messages", "reply_text", "TEXT"),
     ]
     for table, column, col_type in migrations:
         try:
@@ -352,12 +354,13 @@ async def clear_active_session(telegram_id: int):
         await session.commit()
 
 
-async def save_forwarded_message(bot_message_id: int, owner_tg_id: int, original_msg_id: int):
+async def save_forwarded_message(bot_message_id: int, owner_tg_id: int, original_msg_id: int, reply_text: str | None = None):
     async with async_session() as session:
         session.add(ForwardedMessage(
             bot_message_id=bot_message_id,
             owner_tg_id=owner_tg_id,
             original_msg_id=original_msg_id,
+            reply_text=reply_text,
         ))
         await session.commit()
 

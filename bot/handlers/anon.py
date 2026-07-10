@@ -96,25 +96,29 @@ async def handle_reply_to_anonymous(message: Message):
     if message.from_user.id == owner.telegram_id:
         recipient_id = original.sender_id
         header = t("reply_owner_header", owner.language or "ru")
-        confirm = t("reply_sent_owner", lang)
+        quote = original.text
         log_dir = "owner->sender"
-        sent = await bot.send_message(recipient_id, f"{header}\n\n{message.text}")
+        sent = await bot.send_message(recipient_id, f"{header}\n\n{message.text}\n\n---\n{t('reply_quote_you', owner.language or 'ru')}\n{quote}")
     else:
         recipient_id = owner.telegram_id
         header = t("reply_sender_header", owner.language or "ru")
-        confirm = t("reply_sent_sender", lang)
+        quote = forwarded.reply_text
         log_dir = "sender->owner"
+
+        body = f"{header}\n\n{message.text}"
+        if quote:
+            body += f"\n\n---\n{t('reply_quote_you', owner.language or 'ru')}\n{quote}"
 
         if owner.is_admin or owner.is_developer:
             kb = InlineKeyboardMarkup(inline_keyboard=[
                 [InlineKeyboardButton(text=t("whois_btn", owner.language or "ru"), callback_data=f"whois:{original.id}")],
             ])
-            sent = await bot.send_message(recipient_id, f"{header}\n\n{message.text}", reply_markup=kb)
+            sent = await bot.send_message(recipient_id, body, reply_markup=kb)
         else:
-            sent = await bot.send_message(recipient_id, f"{header}\n\n{message.text}")
+            sent = await bot.send_message(recipient_id, body)
 
-    await save_forwarded_message(sent.message_id, recipient_id, original.id)
-    await message.answer(confirm)
+    await save_forwarded_message(sent.message_id, recipient_id, original.id, message.text)
+    await message.answer(t("reply_sent", lang))
 
     logger.info(
         f"REPLY ({log_dir}): {message.from_user.id} "
