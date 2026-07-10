@@ -3,7 +3,12 @@ import sys
 
 from dotenv import load_dotenv
 
-load_dotenv()
+if os.path.isfile(".env"):
+    load_dotenv(".env")
+elif os.path.isfile(".env.example"):
+    load_dotenv(".env.example")
+else:
+    load_dotenv()
 
 BOT_TOKEN: str = os.getenv("BOT_TOKEN", "")
 raw_dev_id = os.getenv("DEVELOPER_ID", "0")
