@@ -1,4 +1,5 @@
 import logging
+import html
 
 from aiogram import F
 from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
@@ -7,7 +8,8 @@ from bot import bot, dp, get_bot_username
 from bot.database import (
     get_active_session, clear_active_session,
     get_link_by_code, get_link_by_id,
-    get_message_by_id, get_forwarded_message, save_forwarded_message,
+    get_message_by_id, get_forwarded_message, get_last_forwarded_for_user,
+    save_forwarded_message,
     create_message, is_banned, get_or_create_user,
     get_or_create_link, reset_link, set_user_language,
 )
@@ -93,29 +95,30 @@ async def handle_reply_to_anonymous(message: Message):
 
     owner = link.user
 
+    quote_text = html.escape(original.text)
+    reply_text = html.escape(message.text)
+
     if message.from_user.id == owner.telegram_id:
         recipient_id = original.sender_id
         header = t("reply_owner_header", owner.language or "ru")
-        quote = original.text
         log_dir = "owner->sender"
-        sent = await bot.send_message(recipient_id, f"{header}\n\n{message.text}\n\n---\n{t('reply_quote_you', owner.language or 'ru')}\n{quote}")
     else:
         recipient_id = owner.telegram_id
         header = t("reply_sender_header", owner.language or "ru")
-        quote = forwarded.reply_text
         log_dir = "sender->owner"
 
-        body = f"{header}\n\n{message.text}"
-        if quote:
-            body += f"\n\n---\n{t('reply_quote_you', owner.language or 'ru')}\n{quote}"
+    prev = await get_last_forwarded_for_user(recipient_id, original.id)
+    reply_to = prev.bot_message_id if prev else None
 
-        if owner.is_admin or owner.is_developer:
-            kb = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text=t("whois_btn", owner.language or "ru"), callback_data=f"whois:{original.id}")],
-            ])
-            sent = await bot.send_message(recipient_id, body, reply_markup=kb)
-        else:
-            sent = await bot.send_message(recipient_id, body)
+    body = f"{header}\n\n<blockquote>{quote_text}</blockquote>\n\n{reply_text}"
+
+    if log_dir == "sender->owner" and (owner.is_admin or owner.is_developer):
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text=t("whois_btn", owner.language or "ru"), callback_data=f"whois:{original.id}")],
+        ])
+        sent = await bot.send_message(recipient_id, body, reply_to_message_id=reply_to, reply_markup=kb)
+    else:
+        sent = await bot.send_message(recipient_id, body, reply_to_message_id=reply_to)
 
     await save_forwarded_message(sent.message_id, recipient_id, original.id, message.text)
     await message.answer(t("reply_sent", lang))

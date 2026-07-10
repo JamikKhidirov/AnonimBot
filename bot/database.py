@@ -376,6 +376,20 @@ async def get_forwarded_message(bot_message_id: int, owner_tg_id: int) -> Forwar
         return result.scalar_one_or_none()
 
 
+async def get_last_forwarded_for_user(owner_tg_id: int, original_msg_id: int) -> ForwardedMessage | None:
+    async with async_session() as session:
+        result = await session.execute(
+            select(ForwardedMessage)
+            .where(
+                ForwardedMessage.owner_tg_id == owner_tg_id,
+                ForwardedMessage.original_msg_id == original_msg_id,
+            )
+            .order_by(ForwardedMessage.id.desc())
+            .limit(1)
+        )
+        return result.scalar_one_or_none()
+
+
 async def get_message_count() -> int:
     async with async_session() as session:
         result = await session.execute(select(func.count(Message.id)))
