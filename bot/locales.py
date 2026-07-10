@@ -37,6 +37,8 @@ _t = {
         "session_expired": "Эта ссылка больше не активна.",
         "new_visitor": "Кто-то перешёл по твоей ссылке и теперь может писать тебе анонимно!",
         "whois_btn": "👤 Кто это?",
+        "whois_all_btn": "📩 Все сообщения отправителя",
+        "whois_profile_btn": "👤 Профиль отправителя",
 
         # /stop
         "stopped": "✅ Ты вышел из чата. Чтобы начать заново, нажми на чью-то ссылку.",
@@ -248,6 +250,8 @@ _t = {
         "session_expired": "This link is no longer active.",
         "new_visitor": "Someone clicked your link and can now send you anonymous messages!",
         "whois_btn": "👤 Who is this?",
+        "whois_all_btn": "📩 All messages from sender",
+        "whois_profile_btn": "👤 Sender profile",
 
         # /stop
         "stopped": "✅ You left the chat. Click someone's link to start again.",
