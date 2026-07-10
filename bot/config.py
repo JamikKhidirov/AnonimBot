@@ -3,12 +3,13 @@ import sys
 
 from dotenv import load_dotenv
 
-if os.path.isfile(".env"):
-    load_dotenv(".env")
-elif os.path.isfile(".env.example"):
-    load_dotenv(".env.example")
-else:
-    load_dotenv()
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+for name in (".env", ".env.example"):
+    p = os.path.join(BASE_DIR, name)
+    if os.path.isfile(p):
+        load_dotenv(p)
+        break
 
 BOT_TOKEN: str = os.getenv("BOT_TOKEN", "")
 raw_dev_id = os.getenv("DEVELOPER_ID", "0")
