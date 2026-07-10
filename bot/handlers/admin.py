@@ -284,7 +284,11 @@ async def msg_info_callback(cb: CallbackQuery):
         await cb.answer()
         lang = await _user_lang(cb.from_user.id)
 
-        msg_id = int(cb.data.split(":", 1)[1])
+        parts = cb.data.split(":")
+        msg_id = int(parts[1])
+        back_cb = None
+        if len(parts) >= 4:
+            back_cb = f"{parts[2]}:{parts[3]}"
         msg = await get_message_by_id(msg_id)
         if not msg:
             await cb.message.edit_text(t("not_found", lang), reply_markup=back_kb())
@@ -304,13 +308,14 @@ async def msg_info_callback(cb: CallbackQuery):
             f"  ID: <code>{msg.sender_id}</code>\n"
             f"  Username: @{msg.sender_username or 'N/A'}\n"
             f"  Имя: {msg.sender_full_name or 'N/A'}\n"
+            f"  Тип: {msg.content_type or 'text'}\n"
             f"  {t('msg_total', lang).format(count=sender_msgs_count)}\n\n"
             f"{t('msg_link_owner', lang)} {owner_info}\n\n"
-            f"{t('msg_text', lang)}\n{msg.text}\n\n"
+            f"{t('msg_text', lang)}\n{msg.text or '(медиа)'}\n\n"
             f"{t('msg_time', lang)} {msg.created_at.strftime('%d.%m.%Y %H:%M:%S')}"
         )
 
-        await cb.message.edit_text(text, reply_markup=msg_info_kb(msg.id, msg.sender_id))
+        await cb.message.edit_text(text, reply_markup=msg_info_kb(msg.id, msg.sender_id, back_cb))
     except Exception as e:
         logger.exception(f"msg_info_callback error: data={cb.data}")
         try:
@@ -378,7 +383,11 @@ async def view_user_callback(cb: CallbackQuery):
         await cb.answer()
         lang = await _user_lang(cb.from_user.id)
 
-        tg_id = int(cb.data.split(":", 1)[1])
+        parts = cb.data.split(":")
+        tg_id = int(parts[1])
+        back_cb = None
+        if len(parts) >= 4:
+            back_cb = f"{parts[2]}:{parts[3]}"
         user = await get_user(tg_id)
         if not user:
             await cb.message.edit_text(t("user_not_found", lang).format(id=tg_id), reply_markup=back_kb())
@@ -392,7 +401,7 @@ async def view_user_callback(cb: CallbackQuery):
             f"{t('name_label', lang).format(name=user.full_name or 'N/A')}\n"
             f"{t('role_label', lang).format(role=role)}\n"
             f"{t('reg_date', lang).format(date=user.created_at.strftime('%d.%m.%Y %H:%M'))}",
-            reply_markup=back_kb(),
+            reply_markup=back_kb(back_cb),
         )
     except Exception as e:
         logger.exception(f"view_user_callback error: data={cb.data}")
@@ -430,7 +439,7 @@ async def whois_callback(cb: CallbackQuery):
             f"Имя: {msg.sender_full_name or 'N/A'}\n"
             f"{t('whois_total', lang).format(count=total_from_sender)}\n"
             f"{t('whois_time', lang).format(time=msg.created_at.strftime('%d.%m.%Y %H:%M:%S'))}\n\n"
-            f"{t('whois_text', lang)} {msg.text}"
+            f"{t('whois_text', lang)} {msg.text or '(медиа)'}"
         )
 
         if recent_msgs:
@@ -450,11 +459,11 @@ async def whois_callback(cb: CallbackQuery):
             )],
             [InlineKeyboardButton(
                 text=t("whois_profile_btn", lang),
-                callback_data=f"view_user:{sender_id}",
+                callback_data=f"view_user:{sender_id}:whois:{msg_id}",
             )],
             [InlineKeyboardButton(
                 text="◀ К сообщению",
-                callback_data=f"msg_info:{msg_id}",
+                callback_data=f"msg_info:{msg_id}:whois:{msg_id}",
             )],
         ])
 

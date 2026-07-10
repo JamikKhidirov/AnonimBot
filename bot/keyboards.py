@@ -13,9 +13,9 @@ def admin_menu_kb() -> InlineKeyboardMarkup:
     ])
 
 
-def back_kb() -> InlineKeyboardMarkup:
+def back_kb(cb_data: str = "admin_panel") -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="◀ Назад в админку", callback_data="admin_panel")],
+        [InlineKeyboardButton(text="◀ Назад", callback_data=cb_data)],
     ])
 
 
@@ -66,7 +66,7 @@ def msgs_page_kb(messages: list, page: int, total: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=kb)
 
 
-def msg_info_kb(msg_id: int, sender_tg_id: int) -> InlineKeyboardMarkup:
+def msg_info_kb(msg_id: int, sender_tg_id: int, back_cb: str | None = None) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(
             text="✉️ Все сообщения от этого отправителя",
@@ -74,9 +74,9 @@ def msg_info_kb(msg_id: int, sender_tg_id: int) -> InlineKeyboardMarkup:
         )],
         [InlineKeyboardButton(
             text="👤 Профиль отправителя",
-            callback_data=f"view_user:{sender_tg_id}",
+            callback_data=f"view_user:{sender_tg_id}" + (f":{back_cb}" if back_cb else ""),
         )],
-        [InlineKeyboardButton(text="◀ К списку сообщений", callback_data="admin_msgs:0")],
+        [InlineKeyboardButton(text="◀ Назад", callback_data=back_cb or "admin_msgs:0")],
     ])
 
 
