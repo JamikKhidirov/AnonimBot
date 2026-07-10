@@ -70,7 +70,7 @@ def msg_info_kb(msg_id: int, sender_tg_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(
             text="✉️ Все сообщения от этого отправителя",
-            callback_data=f"sender_msgs:{sender_tg_id}:0",
+            callback_data=f"sender_msgs:{sender_tg_id}:0:msg_info:{msg_id}",
         )],
         [InlineKeyboardButton(
             text="👤 Профиль отправителя",
@@ -80,19 +80,19 @@ def msg_info_kb(msg_id: int, sender_tg_id: int) -> InlineKeyboardMarkup:
     ])
 
 
-def sender_msgs_page_kb(sender_tg_id: int, messages: list, page: int, total: int) -> InlineKeyboardMarkup:
+def sender_msgs_page_kb(sender_tg_id: int, messages: list, page: int, total: int, back_cb: str | None = None) -> InlineKeyboardMarkup:
     kb = []
     if len(messages) > 0:
         max_page = (total - 1) // 5
         if max_page > 0:
             nav_row = []
             if page > 0:
-                nav_row.append(InlineKeyboardButton(text="◀", callback_data=f"sender_msgs:{sender_tg_id}:{page - 1}"))
+                nav_row.append(InlineKeyboardButton(text="◀", callback_data=f"sender_msgs:{sender_tg_id}:{page - 1}" + (f":{back_cb}" if back_cb else "")))
             nav_row.append(InlineKeyboardButton(text=f"{page + 1}/{max_page + 1}", callback_data="noop"))
             if page < max_page:
-                nav_row.append(InlineKeyboardButton(text="▶", callback_data=f"sender_msgs:{sender_tg_id}:{page + 1}"))
+                nav_row.append(InlineKeyboardButton(text="▶", callback_data=f"sender_msgs:{sender_tg_id}:{page + 1}" + (f":{back_cb}" if back_cb else "")))
             kb.append(nav_row)
-    kb.append([InlineKeyboardButton(text="◀ Назад", callback_data=f"view_user:{sender_tg_id}")])
+    kb.append([InlineKeyboardButton(text="◀ Назад", callback_data=back_cb or f"view_user:{sender_tg_id}")])
     return InlineKeyboardMarkup(inline_keyboard=kb)
 
 

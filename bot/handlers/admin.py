@@ -333,6 +333,11 @@ async def sender_msgs_callback(cb: CallbackQuery):
         parts = cb.data.split(":")
         sender_tg_id = int(parts[1])
         page = int(parts[2])
+        back_cb = None
+        if len(parts) >= 5:
+            back_type = parts[3]
+            back_id = int(parts[4])
+            back_cb = f"{back_type}:{back_id}"
         msgs, total = await get_messages_by_sender_id(sender_tg_id, page, 5)
 
         if not msgs:
@@ -352,7 +357,7 @@ async def sender_msgs_callback(cb: CallbackQuery):
 
         await cb.message.edit_text(
             "\n".join(lines),
-            reply_markup=sender_msgs_page_kb(sender_tg_id, msgs, page, total),
+            reply_markup=sender_msgs_page_kb(sender_tg_id, msgs, page, total, back_cb),
         )
     except Exception as e:
         logger.exception(f"sender_msgs_callback error: data={cb.data}")
@@ -441,11 +446,15 @@ async def whois_callback(cb: CallbackQuery):
         kb = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(
                 text=t("whois_all_btn", lang),
-                callback_data=f"sender_msgs:{sender_id}:0",
+                callback_data=f"sender_msgs:{sender_id}:0:whois:{msg_id}",
             )],
             [InlineKeyboardButton(
                 text=t("whois_profile_btn", lang),
                 callback_data=f"view_user:{sender_id}",
+            )],
+            [InlineKeyboardButton(
+                text="◀ К сообщению",
+                callback_data=f"msg_info:{msg_id}",
             )],
         ])
 
