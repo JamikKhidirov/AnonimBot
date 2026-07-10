@@ -16,8 +16,8 @@ pip install -r requirements.txt
 
 Создай `.env` (скопируй `.env.example`):
 ```
-BOT_TOKEN=1234567890:ABCdefGHIjklmNOPqrstUVwxyz
-DEVELOPER_ID=123456789
+BOT_TOKEN=
+DEVELOPER_ID=
 ```
 
 Запуск:
