@@ -35,6 +35,7 @@ _t = {
             "/stop — выйти из чата."
         ),
         "session_expired": "Эта ссылка больше не активна.",
+        "new_visitor": "Кто-то перешёл по твоей ссылке и теперь может писать тебе анонимно!",
         "whois_btn": "👤 Кто это?",
 
         # /stop
@@ -245,6 +246,7 @@ _t = {
             "/stop — leave the chat."
         ),
         "session_expired": "This link is no longer active.",
+        "new_visitor": "Someone clicked your link and can now send you anonymous messages!",
         "whois_btn": "👤 Who is this?",
 
         # /stop

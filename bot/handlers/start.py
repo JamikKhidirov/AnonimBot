@@ -54,7 +54,8 @@ async def _handle_deep_link(message: Message, user, code: str, lang: str):
 
     await set_active_session(message.from_user.id, code)
     await message.answer(t("chat_started", lang))
+    owner_lang = link.user.language or "ru"
     await bot.send_message(
         link.user.telegram_id,
-        "Кто-то перешёл по твоей ссылке и теперь может писать тебе анонимно!",
+        t("new_visitor", owner_lang),
     )

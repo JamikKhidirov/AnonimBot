@@ -117,7 +117,7 @@ async def admin_callback(cb: CallbackQuery):
                 added_name = f"@{added_by.username}" if added_by and added_by.username else str(a.added_by)
                 lines.append(
                     f"👑 {name} — <code>{a.telegram_id}</code>\n"
-                    f"   Назначен: {a.created_at.strftime('%d.%m.%Y')} by {added_name}"
+                    f"   Назначен: {a.created_at.strftime('%d.%m.%Y')} от {added_name}"
                 )
             await cb.message.edit_text("\n".join(lines), reply_markup=back_kb())
             return
@@ -270,126 +270,6 @@ async def admin_callback(cb: CallbackQuery):
             await cb.message.edit_text(f"❌ Ошибка: {e}", reply_markup=back_kb())
         except Exception:
             pass
-
-    if data == "admin_panel":
-        await cb.message.edit_text(t("admin_panel", lang), reply_markup=admin_menu_kb())
-        return
-
-    if data == "admin_stats":
-        mc = await get_message_count()
-        uc = await get_user_count()
-        lc = await get_link_count()
-        await cb.message.edit_text(
-            t("stats", lang).format(users=uc, links=lc, msgs=mc),
-            reply_markup=back_kb(),
-        )
-        return
-
-    if data == "admin_users":
-        users = await get_all_users()
-        lines = [t("all_users", lang).format(count=len(users))]
-        for u in users:
-            lines.append(_fmt_user(u, lang))
-            if len(lines) > 60:
-                lines.append(f"... и ещё {len(users) - 60}")
-                break
-        await cb.message.edit_text("\n".join(lines), reply_markup=back_kb())
-        return
-
-    if data == "admin_admins":
-        await cb.message.edit_text(
-            t("admin_mgmt", lang),
-            reply_markup=admin_admins_kb(),
-        )
-        return
-
-    if data == "admin_admins_list":
-        admins = await get_all_admin_records()
-        if not admins:
-            await cb.message.edit_text(t("no_admins", lang), reply_markup=back_kb())
-            return
-        lines = [t("admins_list", lang).format(count=len(admins))]
-        for a in admins:
-            user = await get_user(a.telegram_id)
-            name = f"@{user.username}" if user and user.username else (user.full_name if user else f"ID {a.telegram_id}")
-            added_by = await get_user(a.added_by)
-            added_name = f"@{added_by.username}" if added_by and added_by.username else str(a.added_by)
-            lines.append(
-                f"👑 {name} — <code>{a.telegram_id}</code>\n"
-                f"   Назначен: {a.created_at.strftime('%d.%m.%Y')} by {added_name}"
-            )
-        await cb.message.edit_text("\n".join(lines), reply_markup=back_kb())
-        return
-
-    if data == "admin_add_admin":
-        await cb.message.edit_text(
-            "📝 <b>Добавление администратора</b>\n\n"
-            "Отправь команду:\n<code>/add_admin [user_id]</code>",
-            reply_markup=back_kb(),
-        )
-        return
-
-    if data == "admin_remove_admin":
-        await cb.message.edit_text(
-            "📝 <b>Удаление администратора</b>\n\n"
-            "Отправь команду:\n<code>/remove_admin [user_id]</code>",
-            reply_markup=back_kb(),
-        )
-        return
-
-    if data == "admin_search":
-        await cb.message.edit_text(
-            t("search_subtitle", lang),
-            reply_markup=admin_search_kb(),
-        )
-        return
-
-    if data == "admin_search_user":
-        await cb.message.edit_text(t("search_user_title", lang), reply_markup=back_kb())
-        return
-
-    if data == "admin_search_msgs":
-        await cb.message.edit_text(t("search_msgs_title", lang), reply_markup=back_kb())
-        return
-
-    if data == "admin_view_user":
-        await cb.message.edit_text(t("view_user_title", lang), reply_markup=back_kb())
-        return
-
-    if data == "admin_view_msgs":
-        await cb.message.edit_text(t("view_msgs_title", lang), reply_markup=back_kb())
-        return
-
-    if data == "admin_sender":
-        await cb.message.edit_text(t("sender_title", lang), reply_markup=back_kb())
-        return
-
-    if data.startswith("admin_msgs:"):
-        page = int(data.split(":", 1)[1])
-        msgs, total = await get_all_messages(page, 5)
-        if not msgs:
-            await cb.message.edit_text(t("no_msgs_yet", lang), reply_markup=back_kb())
-            return
-
-        lines = [t("all_msgs_title", lang).format(page=page + 1)]
-        for i, m in enumerate(msgs, 1):
-            sender = m.sender_full_name or f"Пользователь {m.sender_id}"
-            lines.append(
-                f"\n{i}. #{m.id}\n"
-                f"   От: {sender}\n"
-                f"   Текст: {m.text[:150]}"
-            )
-        await cb.message.edit_text(
-            "\n".join(lines),
-            reply_markup=msgs_page_kb(msgs, page, total),
-        )
-        return
-
-    if data == "admin_dev":
-        if not is_dev(cb.from_user.id):
-            await cb.message.edit_text(t("dev_only", lang), reply_markup=back_kb())
-            return
-        await cb.message.edit_text(t("dev_panel", lang), reply_markup=back_kb())
         return
 
 
