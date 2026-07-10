@@ -464,7 +464,11 @@ async def sender_msgs_callback(cb: CallbackQuery):
 
         lines = [t("msgs_from_sender", lang).format(id=sender_tg_id, page=page + 1)]
         for i, m in enumerate(msgs, 1):
-            lines.append(f"\n{i}. #{m.id}\n   {m.text[:200]}")
+            link_obj = await get_link_by_id(m.link_id)
+            target = f"@{link_obj.user.username}" if link_obj and link_obj.user else f"владелец #{m.link_id}"
+            lines.append(f"\n{i}. #{m.id} → <b>{target}</b>\n"
+                         f"   📅 {m.created_at.strftime('%d.%m.%Y %H:%M')}\n"
+                         f"   💬 {m.text[:200]}")
 
         await cb.message.edit_text(
             "\n".join(lines),
@@ -530,11 +534,13 @@ async def whois_callback(cb: CallbackQuery):
             await cb.message.edit_text(t("not_found", lang), reply_markup=back_kb())
             return
 
-        total_from_sender = await get_sender_message_count(msg.sender_id)
+        sender_id = msg.sender_id
+        total_from_sender = await get_sender_message_count(sender_id)
+        recent_msgs, _ = await get_messages_by_sender_id(sender_id, 0, 5)
 
         text = (
             f"{t('whois_title', lang)}\n\n"
-            f"ID: <code>{msg.sender_id}</code>\n"
+            f"ID: <code>{sender_id}</code>\n"
             f"Username: @{msg.sender_username or 'N/A'}\n"
             f"Имя: {msg.sender_full_name or 'N/A'}\n"
             f"{t('whois_total', lang).format(count=total_from_sender)}\n"
@@ -542,14 +548,24 @@ async def whois_callback(cb: CallbackQuery):
             f"{t('whois_text', lang)} {msg.text}"
         )
 
+        if recent_msgs:
+            text += t("whois_recent", lang)
+            for i, m in enumerate(recent_msgs[:5], 1):
+                link_obj = await get_link_by_id(m.link_id)
+                target = f"@{link_obj.user.username}" if link_obj and link_obj.user else f"ID {m.link_id}"
+                text += (
+                    f"\n{i}. #{m.id} → <b>{target}</b>\n"
+                    f"   {m.created_at.strftime('%d.%m %H:%M')} — {m.text[:100]}"
+                )
+
         kb = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(
                 text=t("whois_all_btn", lang),
-                callback_data=f"sender_msgs:{msg.sender_id}:0",
+                callback_data=f"sender_msgs:{sender_id}:0",
             )],
             [InlineKeyboardButton(
                 text=t("whois_profile_btn", lang),
-                callback_data=f"view_user:{msg.sender_id}",
+                callback_data=f"view_user:{sender_id}",
             )],
         ])
 

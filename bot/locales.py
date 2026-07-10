@@ -152,8 +152,7 @@ _t = {
         "whois_time": "Время отправки: {time}",
         "whois_total": "Всего отправлено сообщений: {count}",
         "whois_text": "Текст: {text}",
-        "whois_all_btn": "✉️ Все сообщения от этого отправителя",
-        "whois_profile_btn": "👤 Профиль пользователя",
+        "whois_recent": "\n\n━━ <b>Последние сообщения:</b>",
 
         # /show
         "show_usage": "Ответь на анонимное сообщение от бота командой /show, чтобы увидеть кто его написал.",
@@ -361,8 +360,7 @@ _t = {
         "whois_time": "Sent at: {time}",
         "whois_total": "Total messages: {count}",
         "whois_text": "Text: {text}",
-        "whois_all_btn": "✉️ All messages from this sender",
-        "whois_profile_btn": "👤 User profile",
+        "whois_recent": "\n\n━━ <b>Recent messages:</b>",
 
         # /show
         "show_usage": "Reply to an anonymous bot message with /show to see who sent it.",
