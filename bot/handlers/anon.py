@@ -136,8 +136,10 @@ async def reset_link_callback(cb):
             return
 
         share_url = f"https://t.me/{get_bot_username()}?start={new_link.code}"
+        from bot.handlers.start import _link_kb
         await cb.message.edit_text(
-            t("reset_link_done", lang).format(link=share_url)
+            t("reset_link_done", lang).format(link=share_url),
+            reply_markup=_link_kb(share_url),
         )
     except Exception as e:
         logger.exception(f"reset_link_callback error")

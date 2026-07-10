@@ -11,7 +11,8 @@ _t = {
         "start_text": (
             "Привет! 👋\n\n"
             "Этот бот позволяет получать анонимные сообщения.\n\n"
-            "📌 <b>Твоя ссылка для анонимных сообщений:</b>\n{link}\n\n"
+            "📌 <b>Твоя ссылка для анонимных сообщений:</b>\n"
+            "<code>{link}</code>\n\n"
             "📋 <b>Команды:</b>\n"
             "/start — получить свою ссылку\n"
             "/messages — посмотреть свои сообщения\n"
@@ -22,7 +23,8 @@ _t = {
         "start_shared": (
             "Привет! 👋\n\n"
             "Этот бот позволяет получать анонимные сообщения.\n\n"
-            "📌 <b>Твоя ссылка для анонимных сообщений:</b>\n{link}\n\n"
+            "📌 <b>Твоя ссылка для анонимных сообщений:</b>\n"
+            "<code>{link}</code>\n\n"
             "Кому-то уже передана твоя ссылка, но у тебя уже есть активная."
         ),
         "chat_started": (
@@ -201,7 +203,7 @@ _t = {
             "Все старые сообщения останутся, но новые по старой ссылке не пройдут.\n\n"
             "Точно сбросить?"
         ),
-        "reset_link_done": "✅ Ссылка сброшена!\n\nТвоя новая ссылка:\n{link}",
+        "reset_link_done": "✅ Ссылка сброшена!\n\nТвоя новая ссылка:\n<code>{link}</code>",
         "reset_link_btn": "🔄 Сбросить ссылку",
         "cancel_btn": "Отмена",
         "link_reset_cancelled": "Сброс отменён.",
@@ -219,7 +221,8 @@ _t = {
         "start_text": (
             "Hello! 👋\n\n"
             "This bot lets you receive anonymous messages.\n\n"
-            "📌 <b>Your link for anonymous messages:</b>\n{link}\n\n"
+            "📌 <b>Your link for anonymous messages:</b>\n"
+            "<code>{link}</code>\n\n"
             "📋 <b>Commands:</b>\n"
             "/start — get your link\n"
             "/messages — view your messages\n"
@@ -230,7 +233,8 @@ _t = {
         "start_shared": (
             "Hello! 👋\n\n"
             "This bot lets you receive anonymous messages.\n\n"
-            "📌 <b>Your link for anonymous messages:</b>\n{link}\n\n"
+            "📌 <b>Your link for anonymous messages:</b>\n"
+            "<code>{link}</code>\n\n"
             "Someone already shared their link with you, but you already have an active link."
         ),
         "chat_started": (
@@ -409,7 +413,7 @@ _t = {
             "Old messages will remain, but new ones won't work with the old link.\n\n"
             "Are you sure?"
         ),
-        "reset_link_done": "✅ Link reset!\n\nYour new link:\n{link}",
+        "reset_link_done": "✅ Link reset!\n\nYour new link:\n<code>{link}</code>",
         "reset_link_btn": "🔄 Reset link",
         "cancel_btn": "Cancel",
         "link_reset_cancelled": "Reset cancelled.",

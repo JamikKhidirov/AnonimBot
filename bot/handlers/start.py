@@ -1,11 +1,18 @@
 from aiogram.filters import CommandStart
-from aiogram.types import Message
+from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
 
 from bot import bot, dp, get_bot_username
 from bot.database import (
     get_or_create_user, get_or_create_link, get_link_by_code, set_active_session,
 )
 from bot.locales import t
+
+
+def _link_kb(url: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🔗 Открыть ссылку", url=url),
+         InlineKeyboardButton(text="📋 Поделиться", url=f"https://t.me/share/url?url={url}")],
+    ])
 
 
 @dp.message(CommandStart())
@@ -24,7 +31,10 @@ async def start_handler(message: Message, command: CommandStart):
 
     link = await get_or_create_link(user.id)
     share_url = f"https://t.me/{get_bot_username()}?start={link.code}"
-    await message.answer(t("start_text", lang).format(link=share_url))
+    await message.answer(
+        t("start_text", lang).format(link=share_url),
+        reply_markup=_link_kb(share_url),
+    )
 
 
 async def _handle_deep_link(message: Message, user, code: str, lang: str):
@@ -36,7 +46,10 @@ async def _handle_deep_link(message: Message, user, code: str, lang: str):
     if user.id == link.user_id:
         link_obj = await get_or_create_link(user.id)
         share_url = f"https://t.me/{get_bot_username()}?start={link_obj.code}"
-        await message.answer(t("start_text", lang).format(link=share_url))
+        await message.answer(
+            t("start_text", lang).format(link=share_url),
+            reply_markup=_link_kb(share_url),
+        )
         return
 
     await set_active_session(message.from_user.id, code)

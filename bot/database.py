@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 
 from sqlalchemy import (
     Column, Integer, BigInteger, String, Text, Boolean,
-    DateTime, ForeignKey, select, delete, func, or_,
+    DateTime, ForeignKey, select, delete, func, or_, text,
 )
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 from sqlalchemy.orm import DeclarativeBase, relationship, selectinload
@@ -104,6 +104,20 @@ async_session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit
 async def init_db():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+
+    # ── Migration: add missing columns for existing DBs ──
+    migrations = [
+        ("users", "language", "VARCHAR(5) DEFAULT 'ru'"),
+    ]
+    for table, column, col_type in migrations:
+        try:
+            async with engine.connect() as conn:
+                await conn.execute(
+                    text(f"ALTER TABLE {table} ADD COLUMN {column} {col_type}")
+                )
+                await conn.commit()
+        except Exception:
+            pass  # column already exists
 
 
 async def get_or_create_user(telegram_id: int, username: str | None, full_name: str | None) -> User:
