@@ -116,7 +116,14 @@ def admin_tools_kb() -> InlineKeyboardMarkup:
          InlineKeyboardButton(text="📋 Список банов", callback_data="admin_banlist")],
         [InlineKeyboardButton(text="📢 Рассылка", callback_data="admin_broadcast"),
          InlineKeyboardButton(text="🧹 Очистка", callback_data="admin_cleanup")],
-        [InlineKeyboardButton(text="📤 Экспорт CSV", callback_data="admin_export_csv"),
-         InlineKeyboardButton(text="🔄 Сброс ссылки", callback_data="admin_reset_link_tool")],
+         [InlineKeyboardButton(text="📤 Экспорт CSV", callback_data="admin_export_csv"),
+          InlineKeyboardButton(text="🔄 Сброс ссылки", callback_data="admin_reset_link_tool")],
         [InlineKeyboardButton(text="◀ Назад", callback_data="admin_panel")],
+    ])
+
+
+def stop_session_kb(lang: str = "ru") -> InlineKeyboardMarkup:
+    from bot.locales import t
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=t("stop_btn", lang), callback_data="stop_session")],
     ])

@@ -6,6 +6,7 @@ from bot.database import (
     get_or_create_user, get_or_create_link, get_link_by_code, set_active_session,
 )
 from bot.locales import t
+from bot.keyboards import stop_session_kb
 
 
 def _link_kb(url: str) -> InlineKeyboardMarkup:
@@ -53,7 +54,7 @@ async def _handle_deep_link(message: Message, user, code: str, lang: str):
         return
 
     await set_active_session(message.from_user.id, code)
-    await message.answer(t("chat_started", lang))
+    await message.answer(t("chat_started", lang), reply_markup=stop_session_kb(lang))
     owner_lang = link.user.language or "ru"
     await bot.send_message(
         link.user.telegram_id,

@@ -53,7 +53,9 @@ class Message(Base):
     sender_id = Column(BigInteger, nullable=False)
     sender_username = Column(String(255), nullable=True)
     sender_full_name = Column(String(255), nullable=True)
-    text = Column(Text, nullable=False)
+    text = Column(Text, nullable=True)
+    content_type = Column(String(32), default="text")
+    file_id = Column(String(512), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
     link = relationship("ChatLink", back_populates="messages")
@@ -110,6 +112,8 @@ async def init_db():
     migrations = [
         ("users", "language", "VARCHAR(5) DEFAULT 'ru'"),
         ("forwarded_messages", "reply_text", "TEXT"),
+        ("messages", "content_type", "VARCHAR(32) DEFAULT 'text'"),
+        ("messages", "file_id", "VARCHAR(512)"),
     ]
     for table, column, col_type in migrations:
         try:
@@ -249,7 +253,8 @@ async def get_link_by_id(link_id: int) -> ChatLink | None:
 
 
 async def create_message(
-    link_id: int, sender_id: int, text: str,
+    link_id: int, sender_id: int, text: str | None = None,
+    content_type: str = "text", file_id: str | None = None,
     sender_username: str | None = None, sender_full_name: str | None = None,
 ) -> Message:
     async with async_session() as session:
@@ -259,6 +264,8 @@ async def create_message(
             sender_username=sender_username,
             sender_full_name=sender_full_name,
             text=text,
+            content_type=content_type,
+            file_id=file_id,
         )
         session.add(msg)
         await session.commit()

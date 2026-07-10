@@ -31,8 +31,7 @@ _t = {
             "🔗 <b>Чат начат!</b>\n\n"
             "Теперь ты можешь писать анонимные сообщения владельцу этой ссылки.\n"
             "Он не узнает, кто ты.\n\n"
-            "Просто напиши что-нибудь и отправь.\n"
-            "/stop — выйти из чата."
+            "Просто напиши что-нибудь и отправь."
         ),
         "session_expired": "Эта ссылка больше не активна.",
         "new_visitor": "Кто-то перешёл по твоей ссылке и теперь может писать тебе анонимно!",
@@ -64,8 +63,10 @@ _t = {
             "Используй /start чтобы получить свою ссылку, "
             "или перейди по чьей-то ссылке чтобы написать анонимно."
         ),
-        "msg_sent": "Сообщение отправлено анонимно!",
+        "msg_sent": "📩 Сообщение отправлено анонимно!",
         "new_anon": "📩 <b>Новое анонимное сообщение!</b>\n\n{text}\n\nОтветь на это сообщение — твой ответ уйдёт анонимному отправителю.",
+        "new_anon_media": "📩 <b>Новое анонимное сообщение!</b>\n\n{text}\n\nОтветь на это сообщение, чтобы ответить отправителю.",
+        "stop_btn": "⛔ Завершить чат",
         "you_banned": "⛔ Ты забанен. Ты не можешь отправлять анонимные сообщения.",
 
         # Reply
@@ -244,8 +245,7 @@ _t = {
             "🔗 <b>Chat started!</b>\n\n"
             "You can now send anonymous messages to the owner of this link.\n"
             "They won't know who you are.\n\n"
-            "Just type something and send.\n"
-            "/stop — leave the chat."
+            "Just type something and send."
         ),
         "session_expired": "This link is no longer active.",
         "new_visitor": "Someone clicked your link and can now send you anonymous messages!",
@@ -277,8 +277,10 @@ _t = {
             "Use /start to get your link, "
             "or click someone's link to send an anonymous message."
         ),
-        "msg_sent": "Message sent anonymously!",
+        "msg_sent": "📩 Message sent anonymously!",
         "new_anon": "📩 <b>New anonymous message!</b>\n\n{text}\n\nReply to this message — your answer will go to the anonymous sender.",
+        "new_anon_media": "📩 <b>New anonymous message!</b>\n\n{text}\n\nReply to this message to answer the sender.",
+        "stop_btn": "⛔ End chat",
         "you_banned": "⛔ You are banned. You cannot send anonymous messages.",
 
         # Reply
