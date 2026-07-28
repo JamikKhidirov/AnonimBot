@@ -1,10 +1,11 @@
+from aiogram import F
 from aiogram.filters import CommandStart
 from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
 
 from bot import bot, dp, get_bot_username
 from bot.database import (
     get_or_create_user, get_or_create_link, get_link_by_code, set_active_session,
-    get_or_create_referral_code, process_referral,
+    get_or_create_referral_code, process_referral, get_referral_count,
 )
 from bot.locales import t
 from bot.keyboards import stop_session_kb
@@ -14,6 +15,15 @@ def _link_kb(url: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🔗 Открыть ссылку", url=url),
          InlineKeyboardButton(text="📋 Поделиться", url=f"https://t.me/share/url?url={url}")],
+    ])
+
+
+def _start_kb(share_url: str, ref_url: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🔗 Моя ссылка", url=share_url),
+         InlineKeyboardButton(text="📋 Поделиться", url=f"https://t.me/share/url?url={share_url}")],
+        [InlineKeyboardButton(text="👥 Пригласить друга", url=f"https://t.me/share/url?url={ref_url}&text=🎁 Привет! Переходи по этой ссылке и пиши мне анонимно!")],
+        [InlineKeyboardButton(text="🎁 Бонусы", callback_data="bonuses")],
     ])
 
 
@@ -40,17 +50,10 @@ async def start_handler(message: Message, command: CommandStart):
     ref_code = await get_or_create_referral_code(message.from_user.id)
     ref_url = f"https://t.me/{get_bot_username()}?start={ref_code}"
 
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🔗 Моя ссылка", url=share_url),
-         InlineKeyboardButton(text="📋 Поделиться", url=f"https://t.me/share/url?url={share_url}")],
-        [InlineKeyboardButton(text="👥 Пригласить друга", url=f"https://t.me/share/url?url={ref_url}&text=🎁 Привет! Переходи по этой ссылке и пиши мне анонимно!")],
-    ])
-
     text = (
-        t("start_text", lang).format(link=share_url) + "\n\n"
-        + t("referral_info", lang).format(link=ref_url)
+        t("start_text", lang).format(link=share_url)
     )
-    await message.answer(text, reply_markup=kb)
+    await message.answer(text, reply_markup=_start_kb(share_url, ref_url))
 
 
 async def _handle_referral(message: Message, user, code: str, lang: str):
@@ -61,15 +64,7 @@ async def _handle_referral(message: Message, user, code: str, lang: str):
     ref_code = await get_or_create_referral_code(message.from_user.id)
     ref_url = f"https://t.me/{get_bot_username()}?start={ref_code}"
 
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🔗 Моя ссылка", url=share_url),
-         InlineKeyboardButton(text="📋 Поделиться", url=f"https://t.me/share/url?url={share_url}")],
-        [InlineKeyboardButton(text="👥 Пригласить друга", url=f"https://t.me/share/url?url={ref_url}&text=🎁 Привет! Переходи по этой ссылке и пиши мне анонимно!")],
-    ])
-
-    text = (
-        t("start_text", lang).format(link=share_url)
-    )
+    text = t("start_text", lang).format(link=share_url)
 
     if referrer:
         owner_lang = referrer.language or "ru"
@@ -79,7 +74,7 @@ async def _handle_referral(message: Message, user, code: str, lang: str):
         )
         text += "\n\n" + t("referral_welcome", lang)
 
-    await message.answer(text, reply_markup=kb)
+    await message.answer(text, reply_markup=_start_kb(share_url, ref_url))
 
 
 async def _handle_deep_link(message: Message, user, code: str, lang: str):
@@ -95,15 +90,9 @@ async def _handle_deep_link(message: Message, user, code: str, lang: str):
         ref_code = await get_or_create_referral_code(message.from_user.id)
         ref_url = f"https://t.me/{get_bot_username()}?start={ref_code}"
 
-        kb = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="🔗 Моя ссылка", url=share_url),
-             InlineKeyboardButton(text="📋 Поделиться", url=f"https://t.me/share/url?url={share_url}")],
-            [InlineKeyboardButton(text="👥 Пригласить друга", url=f"https://t.me/share/url?url={ref_url}&text=🎁 Привет! Переходи по этой ссылке и пиши мне анонимно!")],
-        ])
-
         await message.answer(
             t("start_text", lang).format(link=share_url),
-            reply_markup=kb,
+            reply_markup=_start_kb(share_url, ref_url),
         )
         return
 
@@ -114,3 +103,69 @@ async def _handle_deep_link(message: Message, user, code: str, lang: str):
         link.user.telegram_id,
         t("new_visitor", owner_lang),
     )
+
+
+@dp.callback_query(F.data == "bonuses")
+async def bonuses_callback(cb):
+    try:
+        await cb.answer()
+        user = await get_or_create_user(cb.from_user.id, cb.from_user.username, cb.from_user.full_name)
+        lang = user.language or "ru"
+
+        ref_code = await get_or_create_referral_code(cb.from_user.id)
+        ref_url = f"https://t.me/{get_bot_username()}?start={ref_code}"
+        ref_count = await get_referral_count(cb.from_user.id)
+
+        from datetime import datetime
+        if user.referral_bonus_until and user.referral_bonus_until > datetime.utcnow():
+            remaining = user.referral_bonus_until - datetime.utcnow()
+            days = remaining.days
+            hours = remaining.seconds // 3600
+            bonus_status = f"✅ <b>Активен</b> — ещё {days}д {hours}ч"
+        else:
+            bonus_status = "❌ <b>Неактивен</b>"
+
+        text = (
+            "🎁 <b>Твои бонусы</b>\n\n"
+            f"👥 Приглашено друзей: <b>{ref_count}</b>\n"
+            f"👁 Просмотр отправителей: {bonus_status}\n\n"
+            "━━━━━━━━━━━━━━━\n"
+            "📋 <b>Твоя реферальная ссылка:</b>\n"
+            f"<code>{ref_url}</code>\n\n"
+            "Скопируй и отправь другу!\n"
+            "За каждого друга ты получишь <b>+3 дня</b> просмотра."
+        )
+
+        from bot.keyboards import back_kb
+        await cb.message.edit_text(text, reply_markup=back_kb("start"))
+    except Exception as e:
+        import logging
+        logging.exception(f"bonuses_callback error")
+        try:
+            await cb.message.edit_text(f"❌ Ошибка: {e}")
+        except Exception:
+            pass
+
+
+@dp.callback_query(F.data == "start")
+async def start_back_callback(cb):
+    try:
+        await cb.answer()
+        user = await get_or_create_user(cb.from_user.id, cb.from_user.username, cb.from_user.full_name)
+        lang = user.language or "ru"
+
+        link = await get_or_create_link(user.id)
+        share_url = f"https://t.me/{get_bot_username()}?start={link.code}"
+
+        ref_code = await get_or_create_referral_code(cb.from_user.id)
+        ref_url = f"https://t.me/{get_bot_username()}?start={ref_code}"
+
+        text = t("start_text", lang).format(link=share_url)
+        await cb.message.edit_text(text, reply_markup=_start_kb(share_url, ref_url))
+    except Exception as e:
+        import logging
+        logging.exception(f"start_back_callback error")
+        try:
+            await cb.message.edit_text(f"❌ Ошибка: {e}")
+        except Exception:
+            pass
