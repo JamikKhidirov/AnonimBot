@@ -211,6 +211,22 @@ _t = {
         "reset_link_btn": "🔄 Сбросить ссылку",
         "cancel_btn": "Отмена",
         "link_reset_cancelled": "Сброс отменён.",
+
+        # Referral
+        "referral_info": (
+            "━━━━━━━━━━━━━━━\n"
+            "👥 <b>Реферальная программа</b>\n\n"
+            "Пригласи друга по ссылке ниже и получи <b>3 дня</b> "
+            "просмотра отправителей анонимных сообщений!\n\n"
+            "🔗 <code>{link}</code>\n\n"
+            "🗓 <i>Бонус суммируется — за каждого друга +3 дня.</i>"
+        ),
+        "referral_welcome": "🎉 Ты пришёл по реферальной ссылке! Твой друг получил 3 дня бонуса.",
+        "referral_bonus_gained": (
+            "🎉 <b>По твоей реферальной ссылке перешёл новый пользователь!</b>\n\n"
+            "✅ Ты получил <b>+3 дня</b> просмотра отправителей анонимных сообщений.\n"
+            "Теперь ты можешь видеть, кто тебе написал!"
+        ),
     },
 
     "en": {
@@ -425,9 +441,24 @@ _t = {
         "reset_link_btn": "🔄 Reset link",
         "cancel_btn": "Cancel",
         "link_reset_cancelled": "Reset cancelled.",
+
+        # Referral
+        "referral_info": (
+            "━━━━━━━━━━━━━━━\n"
+            "👥 <b>Referral Program</b>\n\n"
+            "Invite a friend using the link below and get <b>3 days</b> "
+            "of seeing who sent you anonymous messages!\n\n"
+            "🔗 <code>{link}</code>\n\n"
+            "🗓 <i>Bonus stacks — +3 days per friend.</i>"
+        ),
+        "referral_welcome": "🎉 You came through a referral link! Your friend got 3 days of bonus.",
+        "referral_bonus_gained": (
+            "🎉 <b>A new user came through your referral link!</b>\n\n"
+            "✅ You received <b>+3 days</b> of seeing anonymous message senders.\n"
+            "Now you can see who wrote to you!"
+        ),
     },
 }
-
 
 def t(key: str, lang: str = "ru") -> str:
     return _t.get(lang, _t["ru"]).get(key, _t["ru"].get(key, key))

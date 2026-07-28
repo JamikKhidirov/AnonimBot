@@ -12,6 +12,7 @@ from bot.database import (
     save_forwarded_message,
     create_message, is_banned, get_or_create_user,
     get_or_create_link, reset_link, set_user_language,
+    user_can_see_whois,
 )
 from bot.locales import t
 from bot.keyboards import stop_session_kb
@@ -84,7 +85,7 @@ async def handle_anonymous_message(message: Message):
 
     if content_type == "text":
         owner_text = t("new_anon", owner_lang).format(text=text_content)
-        if owner.is_admin or owner.is_developer:
+        if user_can_see_whois(owner):
             whois_kb = InlineKeyboardMarkup(inline_keyboard=[
                 [InlineKeyboardButton(text=t("whois_btn", owner_lang), callback_data=f"whois:{msg.id}")],
             ])
@@ -96,7 +97,7 @@ async def handle_anonymous_message(message: Message):
         media_copy = await message.copy_to(owner.telegram_id)
         await save_forwarded_message(media_copy.message_id, owner.telegram_id, msg.id)
         note = t("new_anon_media", owner_lang).format(text=text_content)
-        if owner.is_admin or owner.is_developer:
+        if user_can_see_whois(owner):
             whois_kb = InlineKeyboardMarkup(inline_keyboard=[
                 [InlineKeyboardButton(text=t("whois_btn", owner_lang), callback_data=f"whois:{msg.id}")],
             ])
@@ -165,7 +166,7 @@ async def handle_reply_to_anonymous(message: Message):
         reply_text = html.escape(text_content)
         body = f"{header}\n\n<blockquote>{quote_text}</blockquote>\n\n{reply_text}"
 
-        if log_dir == "sender->owner" and (owner.is_admin or owner.is_developer):
+        if log_dir == "sender->owner" and user_can_see_whois(owner):
             kb = InlineKeyboardMarkup(inline_keyboard=[
                 [InlineKeyboardButton(text=t("whois_btn", owner.language or "ru"), callback_data=f"whois:{original.id}")],
             ])

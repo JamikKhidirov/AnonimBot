@@ -5,7 +5,7 @@ from bot import dp, bot, get_bot_username
 from bot.database import (
     get_active_session, clear_active_session,
     get_user_with_links, get_messages_for_link, get_or_create_user,
-    reset_link,
+    reset_link, get_or_create_referral_code,
 )
 from bot.locales import t
 from bot.keyboards import lang_kb
@@ -48,6 +48,18 @@ async def messages_command(message: Message):
         )
     if len(msgs) > 10:
         text_lines.append(f"\n... и ещё {len(msgs) - 10}")
+
+    ref_code = await get_or_create_referral_code(message.from_user.id)
+    ref_url = f"https://t.me/{get_bot_username()}?start={ref_code}"
+
+    from datetime import datetime
+    bonus_text = ""
+    if user.referral_bonus_until and user.referral_bonus_until > datetime.utcnow():
+        remaining = (user.referral_bonus_until - datetime.utcnow()).days
+        hours = ((user.referral_bonus_until - datetime.utcnow()).seconds // 3600)
+        bonus_text = f"\n👁 <b>Просмотр отправителей:</b> ещё {remaining}д {hours}ч\n"
+
+    text_lines.append(f"\n{bonus_text}━━━━━━━━━━━━━━━\n👥 <b>Реферальная ссылка:</b>\n<code>{ref_url}</code>")
 
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text=t("reset_link_btn", lang), callback_data="reset_link")],

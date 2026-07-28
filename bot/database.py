@@ -27,6 +27,8 @@ class User(Base):
     is_admin = Column(Boolean, default=False)
     is_developer = Column(Boolean, default=False)
     language = Column(String(5), default="ru")
+    referral_code = Column(String(64), unique=True, nullable=True)
+    referral_bonus_until = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
     links = relationship("ChatLink", back_populates="user")
@@ -100,6 +102,15 @@ class BannedUser(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
+class Referral(Base):
+    __tablename__ = "referrals"
+
+    id = Column(Integer, primary_key=True)
+    referrer_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    referee_id = Column(Integer, ForeignKey("users.id"), nullable=False, unique=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
 engine = create_async_engine(DATABASE_URL)
 async_session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
@@ -114,6 +125,8 @@ async def init_db():
         ("forwarded_messages", "reply_text", "TEXT"),
         ("messages", "content_type", "VARCHAR(32) DEFAULT 'text'"),
         ("messages", "file_id", "VARCHAR(512)"),
+        ("users", "referral_code", "VARCHAR(64)"),
+        ("users", "referral_bonus_until", "DATETIME"),
     ]
     for table, column, col_type in migrations:
         try:
@@ -486,6 +499,71 @@ async def reset_link(telegram_id: int) -> ChatLink | None:
         await session.commit()
         await session.refresh(new_link)
         return new_link
+
+
+# ───── Referral system ─────
+
+async def get_or_create_referral_code(telegram_id: int) -> str:
+    async with async_session() as session:
+        result = await session.execute(select(User).where(User.telegram_id == telegram_id))
+        user = result.scalar_one_or_none()
+        if not user:
+            return ""
+        if user.referral_code:
+            return user.referral_code
+        user.referral_code = "ref_" + secrets.token_urlsafe(16)
+        await session.commit()
+        return user.referral_code
+
+
+async def process_referral(referee_tg_id: int, referral_code: str) -> User | None:
+    async with async_session() as session:
+        result = await session.execute(select(User).where(User.referral_code == referral_code))
+        referrer = result.scalar_one_or_none()
+        if not referrer:
+            return None
+
+        result = await session.execute(select(User).where(User.telegram_id == referee_tg_id))
+        referee = result.scalar_one_or_none()
+        if not referee or referrer.id == referee.id:
+            return None
+
+        existing = await session.execute(
+            select(Referral).where(Referral.referee_id == referee.id)
+        )
+        if existing.scalar_one_or_none():
+            return referrer
+
+        session.add(Referral(referrer_id=referrer.id, referee_id=referee.id))
+
+        now = datetime.utcnow()
+        if referrer.referral_bonus_until and referrer.referral_bonus_until > now:
+            referrer.referral_bonus_until += timedelta(days=3)
+        else:
+            referrer.referral_bonus_until = now + timedelta(days=3)
+
+        await session.commit()
+        return referrer
+
+
+def user_can_see_whois(user: User) -> bool:
+    if user.is_admin or user.is_developer:
+        return True
+    if user.referral_bonus_until and user.referral_bonus_until > datetime.utcnow():
+        return True
+    return False
+
+
+async def get_referral_count(telegram_id: int) -> int:
+    async with async_session() as session:
+        result = await session.execute(select(User).where(User.telegram_id == telegram_id))
+        user = result.scalar_one_or_none()
+        if not user:
+            return 0
+        count_result = await session.execute(
+            select(func.count(Referral.id)).where(Referral.referrer_id == user.id)
+        )
+        return count_result.scalar() or 0
 
 
 # ───── Auto-delete old messages ─────

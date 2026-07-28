@@ -18,7 +18,7 @@ from bot.database import (
     get_messages_for_link, get_link_by_id, get_forwarded_message,
     ban_user, unban_user, is_banned, get_all_banned,
     get_all_user_ids, export_messages_csv, delete_old_messages,
-    get_or_create_user,
+    get_or_create_user, user_can_see_whois,
 )
 from bot.locales import t, role_label
 from bot.keyboards import (
@@ -416,17 +416,27 @@ async def view_user_callback(cb: CallbackQuery):
 @dp.callback_query(F.data.startswith("whois:"))
 async def whois_callback(cb: CallbackQuery):
     try:
-        if not await ensure_admin(cb.from_user.id):
-            await cb.answer(t("access_denied", await _user_lang(cb.from_user.id)), show_alert=True)
+        user = await get_user(cb.from_user.id)
+        if not user:
+            await cb.answer(t("access_denied", "ru"), show_alert=True)
             return
-        await cb.answer()
-        lang = await _user_lang(cb.from_user.id)
 
         msg_id = int(cb.data.split(":", 1)[1])
         msg = await get_message_by_id(msg_id)
         if not msg:
-            await cb.message.edit_text(t("not_found", lang), reply_markup=back_kb())
+            await cb.answer(t("not_found", await _user_lang(cb.from_user.id)), show_alert=True)
             return
+
+        link = await get_link_by_id(msg.link_id)
+        is_owner = link and link.user.telegram_id == cb.from_user.id
+
+        if not user.is_admin and not user.is_developer:
+            if not is_owner or not user_can_see_whois(user):
+                await cb.answer(t("access_denied", user.language or "ru"), show_alert=True)
+                return
+
+        await cb.answer()
+        lang = user.language or "ru"
 
         sender_id = msg.sender_id
         total_from_sender = await get_sender_message_count(sender_id)
@@ -442,7 +452,7 @@ async def whois_callback(cb: CallbackQuery):
             f"{t('whois_text', lang)} {msg.text or '(медиа)'}"
         )
 
-        if recent_msgs:
+        if recent_msgs and (user.is_admin or user.is_developer):
             text += t("whois_recent", lang)
             for i, m in enumerate(recent_msgs[:5], 1):
                 link_obj = await get_link_by_id(m.link_id)
@@ -453,18 +463,7 @@ async def whois_callback(cb: CallbackQuery):
                 )
 
         kb = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(
-                text=t("whois_all_btn", lang),
-                callback_data=f"sender_msgs:{sender_id}:0:whois:{msg_id}",
-            )],
-            [InlineKeyboardButton(
-                text=t("whois_profile_btn", lang),
-                callback_data=f"view_user:{sender_id}:whois:{msg_id}",
-            )],
-            [InlineKeyboardButton(
-                text="◀ К сообщению",
-                callback_data=f"msg_info:{msg_id}:whois:{msg_id}",
-            )],
+            [InlineKeyboardButton(text="◀ Назад", callback_data="admin_panel")],
         ])
 
         await cb.message.edit_text(text, reply_markup=kb)
@@ -688,10 +687,12 @@ def _chunkify(lines: list[str], size: int) -> list[list[str]]:
 
 @dp.message(Command("show"))
 async def show_command(message: Message):
-    if not await ensure_admin(message.from_user.id):
-        await message.answer(t("access_denied", await _user_lang(message.from_user.id)))
+    user = await get_or_create_user(message.from_user.id, message.from_user.username, message.from_user.full_name)
+    lang = user.language or "ru"
+
+    if not user.is_admin and not user.is_developer and not user_can_see_whois(user):
+        await message.answer(t("access_denied", lang))
         return
-    lang = await _user_lang(message.from_user.id)
 
     replied = message.reply_to_message
     if not replied or replied.from_user.id != bot.id:
@@ -706,6 +707,12 @@ async def show_command(message: Message):
     original = await get_message_by_id(forwarded.original_msg_id)
     if not original:
         await message.answer(t("original_not_found", lang))
+        return
+
+    # Only show if user is the link owner (has bonus) or is admin
+    link = await get_link_by_id(original.link_id)
+    if not link or (link.user.telegram_id != message.from_user.id and not user.is_admin):
+        await message.answer(t("access_denied", lang))
         return
 
     total = await get_sender_message_count(original.sender_id)
