@@ -64,8 +64,8 @@ _t = {
             "или перейди по чьей-то ссылке чтобы написать анонимно."
         ),
         "msg_sent": "📩 Сообщение отправлено анонимно!",
-        "new_anon": "📩 <b>Новое анонимное сообщение!</b>\n\n{text}\n\nОтветь на это сообщение — твой ответ уйдёт анонимному отправителю.",
-        "new_anon_media": "📩 <b>Новое анонимное сообщение!</b>\n\n{text}\n\nОтветь на это сообщение, чтобы ответить отправителю.",
+        "new_anon": "📩 <b>Новое анонимное сообщение!</b>\n\n<i>{text}</i>\n\nОтветь на это сообщение — твой ответ уйдёт анонимному отправителю.",
+        "new_anon_media": "📩 <b>Новое анонимное сообщение!</b>\n\n<i>{text}</i>\n\nОтветь на это сообщение, чтобы ответить отправителю.",
         "stop_btn": "⛔ Завершить чат",
         "you_banned": "⛔ Ты забанен. Ты не можешь отправлять анонимные сообщения.",
 
@@ -221,6 +221,15 @@ _t = {
             "🔗 <code>{link}</code>\n\n"
             "🗓 <i>Бонус суммируется — за каждого друга +3 дня.</i>"
         ),
+        "referral_text": (
+            "🎉 <b>Добро пожаловать по реферальной ссылке!</b>\n\n"
+            "Твой друг <b>пригласил</b> тебя в этого бота!\n"
+            "Теперь ты можешь получать анонимные сообщения по своей уникальной ссылке.\n\n"
+            "📌 <b>Твоя ссылка для анонимных сообщений:</b>\n"
+            "<code>{link}</code>\n\n"
+            "Отправь эту ссылку друзьям, и они смогут писать тебе анонимно!\n"
+            "А твой друг уже получил <b>+3 дня</b> бонуса за то, что пригласил тебя."
+        ),
         "referral_welcome": "🎉 Ты пришёл по реферальной ссылке! Твой друг получил 3 дня бонуса.",
         "referral_bonus_gained": (
             "🎉 <b>По твоей реферальной ссылке перешёл новый пользователь!</b>\n\n"
@@ -294,8 +303,8 @@ _t = {
             "or click someone's link to send an anonymous message."
         ),
         "msg_sent": "📩 Message sent anonymously!",
-        "new_anon": "📩 <b>New anonymous message!</b>\n\n{text}\n\nReply to this message — your answer will go to the anonymous sender.",
-        "new_anon_media": "📩 <b>New anonymous message!</b>\n\n{text}\n\nReply to this message to answer the sender.",
+        "new_anon": "📩 <b>New anonymous message!</b>\n\n<i>{text}</i>\n\nReply to this message — your answer will go to the anonymous sender.",
+        "new_anon_media": "📩 <b>New anonymous message!</b>\n\n<i>{text}</i>\n\nReply to this message to answer the sender.",
         "stop_btn": "⛔ End chat",
         "you_banned": "⛔ You are banned. You cannot send anonymous messages.",
 
@@ -450,6 +459,15 @@ _t = {
             "of seeing who sent you anonymous messages!\n\n"
             "🔗 <code>{link}</code>\n\n"
             "🗓 <i>Bonus stacks — +3 days per friend.</i>"
+        ),
+        "referral_text": (
+            "🎉 <b>Welcome via referral link!</b>\n\n"
+            "Your friend <b>invited</b> you to this bot!\n"
+            "Now you can receive anonymous messages using your unique link.\n\n"
+            "📌 <b>Your link for anonymous messages:</b>\n"
+            "<code>{link}</code>\n\n"
+            "Share this link with friends so they can write to you anonymously!\n"
+            "Your friend already got <b>+3 days</b> bonus for inviting you."
         ),
         "referral_welcome": "🎉 You came through a referral link! Your friend got 3 days of bonus.",
         "referral_bonus_gained": (

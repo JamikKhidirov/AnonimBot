@@ -19,12 +19,16 @@ from bot.database import (
     ban_user, unban_user, is_banned, get_all_banned,
     get_all_user_ids, export_messages_csv, delete_old_messages,
     get_or_create_user, user_can_see_whois,
+    get_advert_config, set_advert_interval, get_active_advert,
+    create_advert, update_advert, get_all_adverts,
+    get_premium_plans, add_premium_plan, remove_premium_plan,
+    set_premium, remove_premium, is_premium,
 )
 from bot.locales import t, role_label
 from bot.keyboards import (
     admin_menu_kb, back_kb,
     msgs_page_kb, msg_info_kb, sender_msgs_page_kb,
-    admin_search_kb, admin_admins_kb,
+    admin_search_kb, admin_admins_kb, admin_tools_kb,
 )
 
 logger = logging.getLogger(__name__)

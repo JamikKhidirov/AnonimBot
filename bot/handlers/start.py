@@ -58,13 +58,9 @@ async def start_handler(message: Message, command: CommandStart):
 
 async def _handle_referral(message: Message, user, code: str, lang: str):
     referrer = await process_referral(message.from_user.id, code)
+
     link = await get_or_create_link(user.id)
     share_url = f"https://t.me/{get_bot_username()}?start={link.code}"
-
-    ref_code = await get_or_create_referral_code(message.from_user.id)
-    ref_url = f"https://t.me/{get_bot_username()}?start={ref_code}"
-
-    text = t("start_text", lang).format(link=share_url)
 
     if referrer:
         owner_lang = referrer.language or "ru"
@@ -72,8 +68,24 @@ async def _handle_referral(message: Message, user, code: str, lang: str):
             referrer.telegram_id,
             t("referral_bonus_gained", owner_lang),
         )
-        text += "\n\n" + t("referral_welcome", lang)
+        text = t("referral_text", lang).format(link=share_url)
 
+        referrer_link = await get_or_create_link(referrer.id)
+        write_to_referrer_url = f"https://t.me/{get_bot_username()}?start={referrer_link.code}"
+
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="💬 Написать пригласившему", url=write_to_referrer_url)],
+            [InlineKeyboardButton(text="🔗 Моя ссылка", url=share_url),
+             InlineKeyboardButton(text="📋 Поделиться", url=f"https://t.me/share/url?url={share_url}")],
+            [InlineKeyboardButton(text="🎁 Бонусы", callback_data="bonuses")],
+        ])
+        await message.answer(text, reply_markup=kb)
+        return
+
+    ref_code = await get_or_create_referral_code(message.from_user.id)
+    ref_url = f"https://t.me/{get_bot_username()}?start={ref_code}"
+
+    text = t("start_text", lang).format(link=share_url)
     await message.answer(text, reply_markup=_start_kb(share_url, ref_url))
 
 
@@ -84,8 +96,7 @@ async def _handle_deep_link(message: Message, user, code: str, lang: str):
         return
 
     if user.id == link.user_id:
-        link_obj = await get_or_create_link(user.id)
-        share_url = f"https://t.me/{get_bot_username()}?start={link_obj.code}"
+        share_url = f"https://t.me/{get_bot_username()}?start={link.code}"
 
         ref_code = await get_or_create_referral_code(message.from_user.id)
         ref_url = f"https://t.me/{get_bot_username()}?start={ref_code}"

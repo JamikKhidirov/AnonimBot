@@ -111,6 +111,44 @@ class Referral(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
+class AdvertConfig(Base):
+    __tablename__ = "advert_config"
+
+    id = Column(Integer, primary_key=True)
+    interval_seconds = Column(Integer, default=600)
+    last_sent_at = Column(DateTime, nullable=True)
+
+
+class Advert(Base):
+    __tablename__ = "adverts"
+
+    id = Column(Integer, primary_key=True)
+    text = Column(Text, nullable=True)
+    video_file_id = Column(String(512), nullable=True)
+    buttons_json = Column(Text, nullable=True)
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class PremiumPlan(Base):
+    __tablename__ = "premium_plans"
+
+    id = Column(Integer, primary_key=True)
+    name = Column(String(100), nullable=False)
+    days = Column(Integer, nullable=False)
+    price = Column(Integer, nullable=False)
+
+
+class PremiumSubscription(Base):
+    __tablename__ = "premium_subscriptions"
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    start_date = Column(DateTime, default=datetime.utcnow)
+    end_date = Column(DateTime, nullable=False)
+    is_active = Column(Boolean, default=True)
+
+
 engine = create_async_engine(DATABASE_URL)
 async_session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
@@ -532,7 +570,7 @@ async def process_referral(referee_tg_id: int, referral_code: str) -> User | Non
             select(Referral).where(Referral.referee_id == referee.id)
         )
         if existing.scalar_one_or_none():
-            return referrer
+            return None
 
         session.add(Referral(referrer_id=referrer.id, referee_id=referee.id))
 
@@ -576,6 +614,146 @@ async def delete_old_messages(days: int) -> int:
         )
         await session.commit()
         return result.rowcount
+
+
+# ───── Broadcast ─────
+
+# ───── Advert system ─────
+
+async def get_advert_config() -> AdvertConfig:
+    async with async_session() as session:
+        result = await session.execute(select(AdvertConfig).limit(1))
+        config = result.scalar_one_or_none()
+        if not config:
+            config = AdvertConfig()
+            session.add(config)
+            await session.commit()
+            await session.refresh(config)
+        return config
+
+
+async def set_advert_interval(seconds: int):
+    async with async_session() as session:
+        result = await session.execute(select(AdvertConfig).limit(1))
+        config = result.scalar_one_or_none()
+        if not config:
+            config = AdvertConfig(interval_seconds=seconds)
+            session.add(config)
+        else:
+            config.interval_seconds = seconds
+        await session.commit()
+
+
+async def get_active_advert() -> Advert | None:
+    async with async_session() as session:
+        result = await session.execute(
+            select(Advert).where(Advert.is_active == True).order_by(Advert.id.desc()).limit(1)
+        )
+        return result.scalar_one_or_none()
+
+
+async def get_all_adverts() -> list[Advert]:
+    async with async_session() as session:
+        result = await session.execute(select(Advert).order_by(Advert.id.desc()))
+        return list(result.scalars().all())
+
+
+async def update_advert(advert_id: int, **kwargs):
+    async with async_session() as session:
+        result = await session.execute(select(Advert).where(Advert.id == advert_id))
+        ad = result.scalar_one_or_none()
+        if ad:
+            for k, v in kwargs.items():
+                setattr(ad, k, v)
+            await session.commit()
+
+
+async def create_advert(text: str | None = None, video_file_id: str | None = None) -> Advert:
+    async with async_session() as session:
+        ad = Advert(text=text, video_file_id=video_file_id)
+        session.add(ad)
+        await session.commit()
+        await session.refresh(ad)
+        return ad
+
+
+# ───── Premium ─────
+
+async def get_premium_plans() -> list[PremiumPlan]:
+    async with async_session() as session:
+        result = await session.execute(select(PremiumPlan).order_by(PremiumPlan.id))
+        return list(result.scalars().all())
+
+
+async def add_premium_plan(name: str, days: int, price: int) -> PremiumPlan:
+    async with async_session() as session:
+        plan = PremiumPlan(name=name, days=days, price=price)
+        session.add(plan)
+        await session.commit()
+        await session.refresh(plan)
+        return plan
+
+
+async def remove_premium_plan(plan_id: int):
+    async with async_session() as session:
+        await session.execute(delete(PremiumPlan).where(PremiumPlan.id == plan_id))
+        await session.commit()
+
+
+async def set_premium(user_tg_id: int, plan_id: int) -> PremiumSubscription | None:
+    async with async_session() as session:
+        result = await session.execute(select(User).where(User.telegram_id == user_tg_id))
+        user = result.scalar_one_or_none()
+        if not user:
+            return None
+        result = await session.execute(select(PremiumPlan).where(PremiumPlan.id == plan_id))
+        plan = result.scalar_one_or_none()
+        if not plan:
+            return None
+        sub = PremiumSubscription(
+            user_id=user.id,
+            end_date=datetime.utcnow() + timedelta(days=plan.days),
+        )
+        session.add(sub)
+        await session.commit()
+        await session.refresh(sub)
+        return sub
+
+
+async def remove_premium(user_tg_id: int):
+    async with async_session() as session:
+        result = await session.execute(select(User).where(User.telegram_id == user_tg_id))
+        user = result.scalar_one_or_none()
+        if user:
+            await session.execute(
+                delete(PremiumSubscription).where(
+                    PremiumSubscription.user_id == user.id,
+                    PremiumSubscription.is_active == True,
+                )
+            )
+            await session.commit()
+
+
+async def is_premium(user_tg_id: int) -> bool:
+    async with async_session() as session:
+        result = await session.execute(select(User).where(User.telegram_id == user_tg_id))
+        user = result.scalar_one_or_none()
+        if not user:
+            return False
+        result = await session.execute(
+            select(PremiumSubscription).where(
+                PremiumSubscription.user_id == user.id,
+                PremiumSubscription.is_active == True,
+                PremiumSubscription.end_date > datetime.utcnow(),
+            ).limit(1)
+        )
+        return result.scalar_one_or_none() is not None
+
+
+async def get_active_session_ids() -> list[int]:
+    async with async_session() as session:
+        result = await session.execute(select(ActiveSession.telegram_id))
+        return [row[0] for row in result.all()]
 
 
 # ───── Broadcast ─────

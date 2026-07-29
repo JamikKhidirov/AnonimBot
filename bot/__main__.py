@@ -10,6 +10,7 @@ from bot import bot, dp, logger, set_bot_username
 from bot.config import DEVELOPER_ID
 from bot.database import init_db, get_or_create_user, get_all_admin_records
 from bot.handlers import start, user, admin, anon
+from bot.ad_scheduler import ad_scheduler
 
 
 USER_COMMANDS = [
@@ -49,6 +50,8 @@ async def main():
     logger.info(f"Bot started: @{bot_info.username}")
 
     await bot.set_my_commands(USER_COMMANDS)
+
+    asyncio.create_task(ad_scheduler())
 
     admins = await get_all_admin_records()
     for a in admins:
