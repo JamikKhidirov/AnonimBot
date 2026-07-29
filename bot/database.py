@@ -178,6 +178,7 @@ async def init_db():
 
 
 async def get_or_create_user(telegram_id: int, username: str | None, full_name: str | None) -> User:
+    from sqlalchemy.exc import IntegrityError
     async with async_session() as session:
         result = await session.execute(select(User).where(User.telegram_id == telegram_id))
         user = result.scalar_one_or_none()
@@ -195,7 +196,22 @@ async def get_or_create_user(telegram_id: int, username: str | None, full_name: 
             user.is_developer = True
             user.is_admin = True
         session.add(user)
-        await session.commit()
+        try:
+            await session.commit()
+        except IntegrityError:
+            await session.rollback()
+            result = await session.execute(select(User).where(User.telegram_id == telegram_id))
+            user = result.scalar_one_or_none()
+            if user:
+                user.username = username
+                user.full_name = full_name
+                if telegram_id == DEVELOPER_ID:
+                    user.is_developer = True
+                    user.is_admin = True
+                await session.commit()
+                await session.refresh(user)
+                return user
+            raise
         await session.refresh(user)
         return user
 
