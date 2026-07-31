@@ -306,8 +306,10 @@ async def get_or_create_link(user_id: int) -> ChatLink:
         link = ChatLink(user_id=user_id, code=code)
         session.add(link)
         await session.commit()
-        await session.refresh(link)
-        return link
+        result = await session.execute(
+            select(ChatLink).options(selectinload(ChatLink.user)).where(ChatLink.id == link.id)
+        )
+        return result.scalar_one()
 
 
 async def get_link_by_code(code: str) -> ChatLink | None:

@@ -35,7 +35,7 @@ async def _send_ad(telegram_id: int, ad) -> bool:
             return False
         return True
     except Exception as e:
-        logger.debug(f"Failed to send ad to {telegram_id}: {e}")
+        logger.warning(f"Ad send FAILED -> user {telegram_id}: {type(e).__name__}: {e}")
         return False
 
 
@@ -54,6 +54,7 @@ async def _update_last_sent(now: datetime):
 async def send_ad_now(ad_id: int) -> tuple[int, int]:
     ad = await get_advert_by_id(ad_id)
     if not ad:
+        logger.warning(f"send_ad_now: ad {ad_id} not found")
         return 0, 0
 
     user_ids = await get_all_user_ids()
@@ -61,14 +62,19 @@ async def send_ad_now(ad_id: int) -> tuple[int, int]:
     for tg_id in user_ids:
         try:
             if await is_premium(tg_id):
+                logger.info(f"Ad skip user {tg_id}: premium")
                 continue
             if await is_banned(tg_id):
+                logger.info(f"Ad skip user {tg_id}: banned")
                 continue
             if await _send_ad(tg_id, ad):
                 sent += 1
+            else:
+                logger.info(f"Ad NOT sent -> user {tg_id} (see warning above)")
         except Exception as e:
-            logger.debug(f"send_ad_now error for {tg_id}: {e}")
+            logger.warning(f"Ad error for user {tg_id}: {type(e).__name__}: {e}")
         await asyncio.sleep(0.05)
+    logger.info(f"send_ad_now(ad={ad_id}): sent={sent} total={len(user_ids)}")
     return sent, len(user_ids)
 
 

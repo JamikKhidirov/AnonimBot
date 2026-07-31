@@ -454,7 +454,7 @@ async def whois_callback(cb: CallbackQuery):
             return
 
         link = await get_link_by_id(msg.link_id)
-        is_owner = link and link.user.telegram_id == cb.from_user.id
+        is_owner = bool(link and link.user and link.user.telegram_id == cb.from_user.id)
 
         if not user.is_admin and not user.is_developer:
             if not is_owner or not user_can_see_whois(user):
@@ -501,7 +501,7 @@ async def whois_callback(cb: CallbackQuery):
                 callback_data=f"view_user:{sender_id}:whois:{msg_id}" + (f":{back_cb}" if back_cb else ""),
             )])
 
-        back_target = back_cb or ("admin_panel" if is_admin else None)
+        back_target = back_cb or f"whois_back:{msg_id}"
         if back_target:
             buttons.append([InlineKeyboardButton(text="◀ Назад", callback_data=back_target)])
 
@@ -513,6 +513,47 @@ async def whois_callback(cb: CallbackQuery):
             await cb.message.edit_text(text)
     except Exception as e:
         logger.exception(f"whois_callback error: data={cb.data}")
+        try:
+            await cb.message.edit_text(f"❌ Ошибка: {e}", reply_markup=back_kb())
+        except Exception:
+            pass
+
+
+@dp.callback_query(F.data.startswith("whois_back:"))
+async def whois_back_callback(cb: CallbackQuery):
+    try:
+        user = await get_user(cb.from_user.id)
+        if not user:
+            await cb.answer(t("access_denied", "ru"), show_alert=True)
+            return
+
+        parts = cb.data.split(":")
+        msg_id = int(parts[1])
+        msg = await get_message_by_id(msg_id)
+        if not msg:
+            await cb.answer(t("not_found", await _user_lang(cb.from_user.id)), show_alert=True)
+            return
+
+        await cb.answer()
+        lang = user.language or "ru"
+
+        if msg.content_type == "text":
+            text = t("new_anon", lang).format(text=msg.text or "")
+        else:
+            text = t("new_anon_media", lang).format(text=msg.text or "")
+
+        kb = None
+        if user_can_see_whois(user):
+            kb = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text=t("whois_btn", lang), callback_data=f"whois:{msg.id}")],
+            ])
+
+        if kb:
+            await cb.message.edit_text(text, reply_markup=kb)
+        else:
+            await cb.message.edit_text(text)
+    except Exception as e:
+        logger.exception(f"whois_back_callback error: data={cb.data}")
         try:
             await cb.message.edit_text(f"❌ Ошибка: {e}", reply_markup=back_kb())
         except Exception:
@@ -755,7 +796,8 @@ async def show_command(message: Message):
 
     # Only show if user is the link owner (has bonus) or is admin
     link = await get_link_by_id(original.link_id)
-    if not link or (link.user.telegram_id != message.from_user.id and not user.is_admin):
+    is_owner = bool(link and link.user and link.user.telegram_id == message.from_user.id)
+    if not link or (not is_owner and not user.is_admin):
         await message.answer(t("access_denied", lang))
         return
 
@@ -1205,8 +1247,12 @@ async def ad_send_now_cb(cb: CallbackQuery):
         from bot.ad_scheduler import send_ad_now
         sent, total = await send_ad_now(ad_id)
         ad = await get_advert_by_id(ad_id)
+        logger.info(f"ad_send_now(ad={ad_id}): sent={sent} of total={total}")
+        not_sent = total - sent
         await cb.message.edit_text(
-            f"✅ <b>Рассылка завершена!</b>\n\nОтправлено: <b>{sent}</b> из {total}",
+            f"✅ <b>Рассылка завершена!</b>\n\n"
+            f"📤 Отправлено: <b>{sent}</b>\n"
+            f"⛔ Не отправлено: <b>{not_sent}</b> (всего юзеров: {total})",
             reply_markup=ad_view_kb(ad_id) if ad else back_kb("ad_list:0"),
         )
     except Exception as e:
@@ -1223,8 +1269,12 @@ async def ad_send_now_active_cb(cb: CallbackQuery):
         await cb.message.edit_text("📤 <b>Отправляю активную рекламу...</b>")
         from bot.ad_scheduler import send_active_ad_now
         sent, total = await send_active_ad_now()
+        logger.info(f"ad_send_now_active: sent={sent} of total={total}")
+        not_sent = total - sent
         await cb.message.edit_text(
-            f"✅ <b>Рассылка завершена!</b>\n\nОтправлено: <b>{sent}</b> из {total}",
+            f"✅ <b>Рассылка завершена!</b>\n\n"
+            f"📤 Отправлено: <b>{sent}</b>\n"
+            f"⛔ Не отправлено: <b>{not_sent}</b> (всего юзеров: {total})",
             reply_markup=back_kb("ad_settings"),
         )
     except Exception as e:
