@@ -97,6 +97,11 @@ async def admin_callback(cb: CallbackQuery):
         lang = await _user_lang(cb.from_user.id)
 
         if data == "admin_ads":
+            await cb.message.edit_text(
+                "📢 <b>Реклама</b>\n\n"
+                "Создавай рекламные объявления, настраивай рассылку по таймеру.",
+                reply_markup=admin_ads_kb(),
+            )
             return
 
         if data == "admin_panel":
@@ -912,28 +917,6 @@ def _format_ad(ad) -> str:
         f"📊 Статус: {status}\n"
         f"🗓 Создана: {ad.created_at.strftime('%d.%m.%Y %H:%M')}"
     )
-
-
-# ─── Меню рекламы ───
-
-@dp.callback_query(F.data == "admin_ads")
-async def admin_ads_cb(cb: CallbackQuery):
-    try:
-        if not await ensure_admin(cb.from_user.id):
-            await cb.answer(t("access_denied", await _user_lang(cb.from_user.id)), show_alert=True)
-            return
-        await cb.answer()
-        await cb.message.edit_text(
-            "📢 <b>Реклама</b>\n\n"
-            "Создавай рекламные объявления, настраивай рассылку по таймеру.",
-            reply_markup=admin_ads_kb(),
-        )
-    except Exception as e:
-        logger.exception(f"admin_ads_cb error")
-        try:
-            await cb.message.edit_text(f"❌ Ошибка: {e}", reply_markup=back_kb())
-        except Exception:
-            pass
 
 
 # ─── Создание рекламы (FSM) ───
