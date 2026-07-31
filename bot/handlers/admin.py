@@ -4,6 +4,8 @@ import io
 
 from aiogram import F
 from aiogram.filters import Command
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton, InputFile
 from aiogram.exceptions import TelegramBadRequest
 
@@ -20,7 +22,8 @@ from bot.database import (
     get_all_user_ids, export_messages_csv, delete_old_messages,
     get_or_create_user, user_can_see_whois,
     get_advert_config, set_advert_interval, get_active_advert,
-    create_advert, update_advert, get_all_adverts,
+    create_advert, update_advert, get_all_adverts, get_advert_by_id,
+    delete_advert, set_advert_enabled, is_advert_enabled,
     get_premium_plans, add_premium_plan, remove_premium_plan,
     set_premium, remove_premium, is_premium,
 )
@@ -29,9 +32,26 @@ from bot.keyboards import (
     admin_menu_kb, back_kb,
     msgs_page_kb, msg_info_kb, sender_msgs_page_kb,
     admin_search_kb, admin_admins_kb, admin_tools_kb,
+    admin_ads_kb, ad_list_kb, ad_view_kb, ad_edit_menu_kb, ad_settings_kb,
 )
 
 logger = logging.getLogger(__name__)
+
+
+class AdCreateStates(StatesGroup):
+    name = State()
+    media = State()
+    text = State()
+    button_text = State()
+    button_url = State()
+
+
+class AdEditStates(StatesGroup):
+    value = State()
+
+
+class AdIntervalStates(StatesGroup):
+    waiting = State()
 
 
 def is_dev(tg_id: int) -> bool:
@@ -75,6 +95,9 @@ async def admin_callback(cb: CallbackQuery):
         await cb.answer()
         data = cb.data
         lang = await _user_lang(cb.from_user.id)
+
+        if data == "admin_ads":
+            return
 
         if data == "admin_panel":
             await cb.message.edit_text(t("admin_panel", lang), reply_markup=admin_menu_kb())
@@ -290,9 +313,7 @@ async def msg_info_callback(cb: CallbackQuery):
 
         parts = cb.data.split(":")
         msg_id = int(parts[1])
-        back_cb = None
-        if len(parts) >= 4:
-            back_cb = f"{parts[2]}:{parts[3]}"
+        back_cb = ":".join(parts[2:]) if len(parts) > 2 else None
         msg = await get_message_by_id(msg_id)
         if not msg:
             await cb.message.edit_text(t("not_found", lang), reply_markup=back_kb())
@@ -342,11 +363,7 @@ async def sender_msgs_callback(cb: CallbackQuery):
         parts = cb.data.split(":")
         sender_tg_id = int(parts[1])
         page = int(parts[2])
-        back_cb = None
-        if len(parts) >= 5:
-            back_type = parts[3]
-            back_id = int(parts[4])
-            back_cb = f"{back_type}:{back_id}"
+        back_cb = ":".join(parts[3:]) if len(parts) > 3 else None
         msgs, total = await get_messages_by_sender_id(sender_tg_id, page, 5)
 
         if not msgs:
@@ -389,9 +406,7 @@ async def view_user_callback(cb: CallbackQuery):
 
         parts = cb.data.split(":")
         tg_id = int(parts[1])
-        back_cb = None
-        if len(parts) >= 4:
-            back_cb = f"{parts[2]}:{parts[3]}"
+        back_cb = ":".join(parts[2:]) if len(parts) > 2 else None
         user = await get_user(tg_id)
         if not user:
             await cb.message.edit_text(t("user_not_found", lang).format(id=tg_id), reply_markup=back_kb())
@@ -425,7 +440,9 @@ async def whois_callback(cb: CallbackQuery):
             await cb.answer(t("access_denied", "ru"), show_alert=True)
             return
 
-        msg_id = int(cb.data.split(":", 1)[1])
+        parts = cb.data.split(":")
+        msg_id = int(parts[1])
+        back_cb = ":".join(parts[2:]) if len(parts) > 2 else None
         msg = await get_message_by_id(msg_id)
         if not msg:
             await cb.answer(t("not_found", await _user_lang(cb.from_user.id)), show_alert=True)
@@ -466,11 +483,29 @@ async def whois_callback(cb: CallbackQuery):
                     f"   {m.created_at.strftime('%d.%m %H:%M')} — {m.text[:100]}"
                 )
 
-        kb = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="◀ Назад", callback_data="admin_panel")],
-        ])
+        is_admin = user.is_admin or user.is_developer
 
-        await cb.message.edit_text(text, reply_markup=kb)
+        buttons = []
+        if is_admin:
+            buttons.append([InlineKeyboardButton(
+                text="✉️ Все сообщения отправителя",
+                callback_data=f"sender_msgs:{sender_id}:0:whois:{msg_id}" + (f":{back_cb}" if back_cb else ""),
+            )])
+            buttons.append([InlineKeyboardButton(
+                text="👤 Профиль отправителя",
+                callback_data=f"view_user:{sender_id}:whois:{msg_id}" + (f":{back_cb}" if back_cb else ""),
+            )])
+
+        back_target = back_cb or ("admin_panel" if is_admin else None)
+        if back_target:
+            buttons.append([InlineKeyboardButton(text="◀ Назад", callback_data=back_target)])
+
+        kb = InlineKeyboardMarkup(inline_keyboard=buttons) if buttons else None
+
+        if kb:
+            await cb.message.edit_text(text, reply_markup=kb)
+        else:
+            await cb.message.edit_text(text)
     except Exception as e:
         logger.exception(f"whois_callback error: data={cb.data}")
         try:
@@ -856,8 +891,556 @@ async def cleanup_command(message: Message):
     await message.answer(t("cleanup_done", "ru").format(count=count))
 
 
-@dp.message(Command("language"))
-async def language_command(message: Message):
-    from bot.keyboards import lang_kb
-    user = await get_or_create_user(message.from_user.id, message.from_user.username, message.from_user.full_name)
-    await message.answer(t("lang_choose", user.language or "ru"), reply_markup=lang_kb())
+# ═══════════════════════ РЕКЛАМА (ADS) ═══════════════════════
+
+def _ad_cancel_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="❌ Отмена", callback_data="ad_cancel")],
+    ])
+
+
+def _format_ad(ad) -> str:
+    media = "🎥 Видео" if ad.video_file_id else ("🖼 Фото" if ad.photo_file_id else "📝 Текст")
+    btn = f"🔗 {ad.button_text} → {ad.button_url}" if ad.button_text and ad.button_url else "—"
+    status = "🟢 Активна" if ad.is_active else "⚪️ Выключена"
+    return (
+        f"📢 <b>{ad.name or f'Реклама #{ad.id}'}</b>\n\n"
+        f"🆔 ID: <code>{ad.id}</code>\n"
+        f"📄 Тип: {media}\n"
+        f"📝 Описание: {ad.text or '—'}\n"
+        f"🔘 Кнопка: {btn}\n"
+        f"📊 Статус: {status}\n"
+        f"🗓 Создана: {ad.created_at.strftime('%d.%m.%Y %H:%M')}"
+    )
+
+
+# ─── Меню рекламы ───
+
+@dp.callback_query(F.data == "admin_ads")
+async def admin_ads_cb(cb: CallbackQuery):
+    try:
+        if not await ensure_admin(cb.from_user.id):
+            await cb.answer(t("access_denied", await _user_lang(cb.from_user.id)), show_alert=True)
+            return
+        await cb.answer()
+        await cb.message.edit_text(
+            "📢 <b>Реклама</b>\n\n"
+            "Создавай рекламные объявления, настраивай рассылку по таймеру.",
+            reply_markup=admin_ads_kb(),
+        )
+    except Exception as e:
+        logger.exception(f"admin_ads_cb error")
+        try:
+            await cb.message.edit_text(f"❌ Ошибка: {e}", reply_markup=back_kb())
+        except Exception:
+            pass
+
+
+# ─── Создание рекламы (FSM) ───
+
+@dp.callback_query(F.data == "ad_create")
+async def ad_create_start(cb: CallbackQuery, state: FSMContext):
+    try:
+        if not await ensure_admin(cb.from_user.id):
+            await cb.answer(t("access_denied", await _user_lang(cb.from_user.id)), show_alert=True)
+            return
+        await cb.answer()
+        await state.set_state(AdCreateStates.name)
+        await state.set_data({"ad": {}})
+        await cb.message.edit_text(
+            "📝 <b>Создание рекламы</b> — шаг 1/5\n\n"
+            "Введи <b>название</b> рекламы:",
+            reply_markup=_ad_cancel_kb(),
+        )
+    except Exception as e:
+        logger.exception(f"ad_create_start error")
+        await state.clear()
+
+
+@dp.message(AdCreateStates.name)
+async def ad_name_received(message: Message, state: FSMContext):
+    data = await state.get_data()
+    ad = data.get("ad", {})
+    ad["name"] = message.text.strip()[:200]
+    await state.set_data({"ad": ad})
+    await state.set_state(AdCreateStates.media)
+    await message.answer(
+        "🖼 <b>Шаг 2/5</b> — Медиа\n\n"
+        "Отправь <b>фото</b> или <b>видео</b> для рекламы.\n"
+        "Если нужна реклама без медиа — отправь: <code>пропустить</code>",
+        reply_markup=_ad_cancel_kb(),
+    )
+
+
+@dp.message(AdCreateStates.media)
+async def ad_media_received(message: Message, state: FSMContext):
+    data = await state.get_data()
+    ad = data.get("ad", {})
+
+    if message.photo:
+        ad["photo_file_id"] = message.photo[-1].file_id
+    elif message.video:
+        ad["video_file_id"] = message.video.file_id
+    elif message.animation:
+        ad["video_file_id"] = message.animation.file_id
+    elif message.text and message.text.strip().lower() in ("пропустить", "skip", "-"):
+        pass
+    else:
+        await message.answer(
+            "⚠️ Отправь <b>фото</b>, <b>видео</b> или напиши <code>пропустить</code>:",
+            reply_markup=_ad_cancel_kb(),
+        )
+        return
+
+    await state.set_data({"ad": ad})
+    await state.set_state(AdCreateStates.text)
+    await message.answer(
+        "✍️ <b>Шаг 3/5</b> — Описание\n\n"
+        "Введи <b>текст (описание)</b> рекламы:",
+        reply_markup=_ad_cancel_kb(),
+    )
+
+
+@dp.message(AdCreateStates.text)
+async def ad_text_received(message: Message, state: FSMContext):
+    data = await state.get_data()
+    ad = data.get("ad", {})
+    ad["text"] = message.text.strip() if message.text else ""
+    await state.set_data({"ad": ad})
+    await state.set_state(AdCreateStates.button_text)
+    await message.answer(
+        "🔗 <b>Шаг 4/5</b> — Кнопка\n\n"
+        "Введи <b>текст кнопки</b> (например: «Перейти на сайт»).\n"
+        "Если кнопка не нужна — отправь: <code>пропустить</code>",
+        reply_markup=_ad_cancel_kb(),
+    )
+
+
+@dp.message(AdCreateStates.button_text)
+async def ad_button_text_received(message: Message, state: FSMContext):
+    data = await state.get_data()
+    ad = data.get("ad", {})
+
+    if message.text and message.text.strip().lower() in ("пропустить", "skip", "-"):
+        ad["button_text"] = None
+        ad["button_url"] = None
+        await _finalize_ad(message, state, ad)
+        return
+
+    ad["button_text"] = message.text.strip()[:100]
+    await state.set_data({"ad": ad})
+    await state.set_state(AdCreateStates.button_url)
+    await message.answer(
+        "🔗 <b>Шаг 5/5</b> — Ссылка кнопки\n\n"
+        "Введи <b>URL</b> (ссылку), куда ведёт кнопка:\n"
+        "Например: <code>https://example.com</code>",
+        reply_markup=_ad_cancel_kb(),
+    )
+
+
+@dp.message(AdCreateStates.button_url)
+async def ad_button_url_received(message: Message, state: FSMContext):
+    data = await state.get_data()
+    ad = data.get("ad", {})
+    url = message.text.strip()
+    if not url.startswith("http://") and not url.startswith("https://"):
+        url = "https://" + url
+    ad["button_url"] = url
+    await _finalize_ad(message, state, ad)
+
+
+async def _finalize_ad(message: Message, state: FSMContext, ad: dict):
+    new_ad = await create_advert(
+        name=ad.get("name"),
+        text=ad.get("text"),
+        photo_file_id=ad.get("photo_file_id"),
+        video_file_id=ad.get("video_file_id"),
+        button_text=ad.get("button_text"),
+        button_url=ad.get("button_url"),
+    )
+    await state.clear()
+    await message.answer(
+        f"✅ <b>Реклама создана!</b>\n\n{_format_ad(new_ad)}",
+        reply_markup=back_kb("ad_list:0"),
+    )
+
+
+@dp.callback_query(F.data == "ad_cancel")
+async def ad_cancel(cb: CallbackQuery, state: FSMContext):
+    await state.clear()
+    await cb.answer()
+    try:
+        await cb.message.edit_text("❌ Отменено.", reply_markup=back_kb("admin_ads"))
+    except Exception:
+        pass
+
+
+# ─── Список реклам ───
+
+@dp.callback_query(F.data.startswith("ad_list:"))
+async def ad_list_cb(cb: CallbackQuery):
+    try:
+        if not await ensure_admin(cb.from_user.id):
+            await cb.answer(t("access_denied", await _user_lang(cb.from_user.id)), show_alert=True)
+            return
+        await cb.answer()
+        page = int(cb.data.split(":")[1])
+        ads = await get_all_adverts()
+        per_page = 5
+        total = len(ads)
+        start = page * per_page
+        page_ads = ads[start:start + per_page]
+
+        if not page_ads:
+            await cb.message.edit_text(
+                "📋 <b>Реклам ещё нет</b>\n\nСоздай первую рекламу!",
+                reply_markup=back_kb("admin_ads"),
+            )
+            return
+
+        await cb.message.edit_text(
+            f"📋 <b>Рекламы ({total}):</b>",
+            reply_markup=ad_list_kb(page_ads, page, total, per_page),
+        )
+    except Exception as e:
+        logger.exception(f"ad_list_cb error")
+        try:
+            await cb.message.edit_text(f"❌ Ошибка: {e}", reply_markup=back_kb())
+        except Exception:
+            pass
+
+
+# ─── Просмотр рекламы ───
+
+@dp.callback_query(F.data.startswith("ad_view:"))
+async def ad_view_cb(cb: CallbackQuery):
+    try:
+        if not await ensure_admin(cb.from_user.id):
+            await cb.answer(t("access_denied", await _user_lang(cb.from_user.id)), show_alert=True)
+            return
+        await cb.answer()
+        parts = cb.data.split(":")
+        ad_id = int(parts[1])
+        back_cb = ":".join(parts[2:]) if len(parts) > 2 else None
+        ad = await get_advert_by_id(ad_id)
+        if not ad:
+            await cb.message.edit_text(t("not_found", await _user_lang(cb.from_user.id)), reply_markup=back_kb())
+            return
+        await cb.message.edit_text(_format_ad(ad), reply_markup=ad_view_kb(ad_id, back_cb))
+    except Exception as e:
+        logger.exception(f"ad_view_cb error")
+        try:
+            await cb.message.edit_text(f"❌ Ошибка: {e}", reply_markup=back_kb())
+        except Exception:
+            pass
+
+
+# ─── Вкл/Выкл рекламы ───
+
+@dp.callback_query(F.data.startswith("ad_toggle:"))
+async def ad_toggle_cb(cb: CallbackQuery):
+    try:
+        if not await ensure_admin(cb.from_user.id):
+            await cb.answer(t("access_denied", await _user_lang(cb.from_user.id)), show_alert=True)
+            return
+        parts = cb.data.split(":")
+        ad_id = int(parts[1])
+        back_cb = ":".join(parts[2:]) if len(parts) > 2 else None
+        ad = await get_advert_by_id(ad_id)
+        if not ad:
+            await cb.answer("Реклама не найдена", show_alert=True)
+            return
+        await update_advert(ad_id, is_active=not ad.is_active)
+        await cb.answer()
+        ad = await get_advert_by_id(ad_id)
+        await cb.message.edit_text(_format_ad(ad), reply_markup=ad_view_kb(ad_id, back_cb))
+    except Exception as e:
+        logger.exception(f"ad_toggle_cb error")
+        try:
+            await cb.message.edit_text(f"❌ Ошибка: {e}", reply_markup=back_kb())
+        except Exception:
+            pass
+
+
+# ─── Удаление рекламы ───
+
+@dp.callback_query(F.data.startswith("ad_delete:"))
+async def ad_delete_cb(cb: CallbackQuery):
+    try:
+        if not await ensure_admin(cb.from_user.id):
+            await cb.answer(t("access_denied", await _user_lang(cb.from_user.id)), show_alert=True)
+            return
+        await cb.answer()
+        parts = cb.data.split(":")
+        ad_id = int(parts[1])
+        back_cb = ":".join(parts[2:]) if len(parts) > 2 else None
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="✅ Да, удалить", callback_data=f"ad_delete_confirm:{ad_id}")],
+            [InlineKeyboardButton(text="❌ Отмена", callback_data=back_cb or f"ad_view:{ad_id}")],
+        ])
+        await cb.message.edit_text(
+            f"🗑 <b>Удалить рекламу?</b>\n\nЭто действие нельзя отменить.",
+            reply_markup=kb,
+        )
+    except Exception as e:
+        logger.exception(f"ad_delete_cb error")
+
+
+@dp.callback_query(F.data.startswith("ad_delete_confirm:"))
+async def ad_delete_confirm_cb(cb: CallbackQuery):
+    try:
+        if not await ensure_admin(cb.from_user.id):
+            await cb.answer(t("access_denied", await _user_lang(cb.from_user.id)), show_alert=True)
+            return
+        await cb.answer()
+        ad_id = int(cb.data.split(":")[1])
+        await delete_advert(ad_id)
+        ads = await get_all_adverts()
+        if not ads:
+            await cb.message.edit_text("✅ Реклама удалена.", reply_markup=back_kb("admin_ads"))
+            return
+        page_ads = ads[:5]
+        await cb.message.edit_text(
+            "✅ <b>Реклама удалена.</b>\n\n📋 <b>Остальные рекламы:</b>",
+            reply_markup=ad_list_kb(page_ads, 0, len(ads), 5),
+        )
+    except Exception as e:
+        logger.exception(f"ad_delete_confirm_cb error")
+
+
+# ─── Отправка сейчас ───
+
+@dp.callback_query(F.data.startswith("ad_send_now:"))
+async def ad_send_now_cb(cb: CallbackQuery):
+    try:
+        if not await ensure_admin(cb.from_user.id):
+            await cb.answer(t("access_denied", await _user_lang(cb.from_user.id)), show_alert=True)
+            return
+        await cb.answer()
+        ad_id = int(cb.data.split(":")[1])
+        await cb.message.edit_text("📤 <b>Отправляю рекламу...</b>")
+        from bot.ad_scheduler import send_ad_now
+        sent, total = await send_ad_now(ad_id)
+        ad = await get_advert_by_id(ad_id)
+        await cb.message.edit_text(
+            f"✅ <b>Рассылка завершена!</b>\n\nОтправлено: <b>{sent}</b> из {total}",
+            reply_markup=ad_view_kb(ad_id) if ad else back_kb("ad_list:0"),
+        )
+    except Exception as e:
+        logger.exception(f"ad_send_now_cb error")
+
+
+@dp.callback_query(F.data == "ad_send_now_active")
+async def ad_send_now_active_cb(cb: CallbackQuery):
+    try:
+        if not await ensure_admin(cb.from_user.id):
+            await cb.answer(t("access_denied", await _user_lang(cb.from_user.id)), show_alert=True)
+            return
+        await cb.answer()
+        await cb.message.edit_text("📤 <b>Отправляю активную рекламу...</b>")
+        from bot.ad_scheduler import send_active_ad_now
+        sent, total = await send_active_ad_now()
+        await cb.message.edit_text(
+            f"✅ <b>Рассылка завершена!</b>\n\nОтправлено: <b>{sent}</b> из {total}",
+            reply_markup=back_kb("ad_settings"),
+        )
+    except Exception as e:
+        logger.exception(f"ad_send_now_active_cb error")
+
+
+# ─── Редактирование рекламы ───
+
+@dp.callback_query(F.data.startswith("ad_edit_menu:"))
+async def ad_edit_menu_cb(cb: CallbackQuery):
+    try:
+        if not await ensure_admin(cb.from_user.id):
+            await cb.answer(t("access_denied", await _user_lang(cb.from_user.id)), show_alert=True)
+            return
+        await cb.answer()
+        parts = cb.data.split(":")
+        ad_id = int(parts[1])
+        back_cb = ":".join(parts[2:]) if len(parts) > 2 else None
+        await cb.message.edit_text(
+            "✏️ <b>Редактирование рекламы</b>\n\nВыбери, что изменить:",
+            reply_markup=ad_edit_menu_kb(ad_id, back_cb),
+        )
+    except Exception as e:
+        logger.exception(f"ad_edit_menu_cb error")
+
+
+@dp.callback_query(F.data.startswith("ad_edit_field:"))
+async def ad_edit_field_cb(cb: CallbackQuery, state: FSMContext):
+    try:
+        if not await ensure_admin(cb.from_user.id):
+            await cb.answer(t("access_denied", await _user_lang(cb.from_user.id)), show_alert=True)
+            return
+        await cb.answer()
+        parts = cb.data.split(":")
+        ad_id = int(parts[1])
+        field = parts[2]
+        back_cb = ":".join(parts[3:]) if len(parts) > 3 else None
+
+        ad = await get_advert_by_id(ad_id)
+        if not ad:
+            await cb.message.edit_text(t("not_found", await _user_lang(cb.from_user.id)), reply_markup=back_kb())
+            return
+
+        await state.set_data({"ad_id": ad_id, "field": field, "back_cb": back_cb})
+        await state.set_state(AdEditStates.value)
+
+        if field == "media":
+            await cb.message.edit_text(
+                "🖼 <b>Новое медиа</b>\n\nОтправь <b>фото</b> или <b>видео</b>.\n"
+                "Если убрать медиа — отправь: <code>удалить</code>",
+                reply_markup=_ad_cancel_kb(),
+            )
+        elif field == "button":
+            await cb.message.edit_text(
+                "🔗 <b>Новая кнопка</b>\n\n"
+                "Отправь текст кнопки и ссылку через пробел или с новой строки:\n"
+                "<code>Текст кнопки</code>\n<code>https://ссылка</code>\n\n"
+                "Чтобы убрать кнопку — отправь: <code>удалить</code>",
+                reply_markup=_ad_cancel_kb(),
+            )
+        else:
+            await cb.message.edit_text(
+                f"✍️ <b>Новое значение для «{field}»</b>\n\nВведи новый текст:",
+                reply_markup=_ad_cancel_kb(),
+            )
+    except Exception as e:
+        logger.exception(f"ad_edit_field_cb error")
+
+
+@dp.message(AdEditStates.value)
+async def ad_edit_value_received(message: Message, state: FSMContext):
+    data = await state.get_data()
+    ad_id = data.get("ad_id")
+    field = data.get("field")
+    back_cb = data.get("back_cb")
+    ad = await get_advert_by_id(ad_id) if ad_id else None
+    if not ad:
+        await state.clear()
+        await message.answer("❌ Реклама не найдена.")
+        return
+
+    value = message.text.strip() if message.text else ""
+
+    if field == "media":
+        if message.photo:
+            await update_advert(ad_id, photo_file_id=message.photo[-1].file_id, video_file_id=None)
+        elif message.video:
+            await update_advert(ad_id, video_file_id=message.video.file_id, photo_file_id=None)
+        elif value.lower() in ("удалить", "delete", "убрать"):
+            await update_advert(ad_id, photo_file_id=None, video_file_id=None)
+        else:
+            await message.answer("⚠️ Отправь <b>фото</b>, <b>видео</b> или <code>удалить</code>:",
+                                 reply_markup=_ad_cancel_kb())
+            return
+    elif field == "button":
+        if value.lower() in ("удалить", "delete", "убрать"):
+            await update_advert(ad_id, button_text=None, button_url=None)
+        else:
+            lines = [l.strip() for l in message.text.splitlines() if l.strip()]
+            if len(lines) >= 2:
+                btn_text = lines[0][:100]
+                btn_url = lines[1]
+                if not btn_url.startswith("http://") and not btn_url.startswith("https://"):
+                    btn_url = "https://" + btn_url
+                await update_advert(ad_id, button_text=btn_text, button_url=btn_url)
+            else:
+                await message.answer(
+                    "⚠️ Отправь текст и ссылку (двумя строками или через пробел):\n"
+                    "<code>Текст кнопки</code>\n<code>https://ссылка</code>",
+                    reply_markup=_ad_cancel_kb(),
+                )
+                return
+    else:
+        await update_advert(ad_id, **{field: value})
+
+    await state.clear()
+    ad = await get_advert_by_id(ad_id)
+    await message.answer(f"✅ <b>Реклама обновлена!</b>\n\n{_format_ad(ad)}",
+                         reply_markup=ad_view_kb(ad_id, back_cb))
+
+
+# ─── Настройки рассылки ───
+
+@dp.callback_query(F.data == "ad_settings")
+async def ad_settings_cb(cb: CallbackQuery):
+    try:
+        if not await ensure_admin(cb.from_user.id):
+            await cb.answer(t("access_denied", await _user_lang(cb.from_user.id)), show_alert=True)
+            return
+        await cb.answer()
+        config = await get_advert_config()
+        status = "🟢 Включена" if config.is_enabled else "🔴 Выключена"
+        interval_min = config.interval_seconds // 60
+        text = (
+            "⚙️ <b>Настройки рассылки рекламы</b>\n\n"
+            f"📊 Статус: <b>{status}</b>\n"
+            f"⏱ Интервал: <b>{interval_min} мин</b>\n"
+            f"🕒 Последняя отправка: {config.last_sent_at.strftime('%d.%m.%Y %H:%M') if config.last_sent_at else '—'}\n\n"
+            "Реклама отправляется всем пользователям (кроме премиум и забаненных)."
+        )
+        await cb.message.edit_text(text, reply_markup=ad_settings_kb(config))
+    except Exception as e:
+        logger.exception(f"ad_settings_cb error")
+        try:
+            await cb.message.edit_text(f"❌ Ошибка: {e}", reply_markup=back_kb())
+        except Exception:
+            pass
+
+
+@dp.callback_query(F.data == "ad_toggle_scheduler")
+async def ad_toggle_scheduler_cb(cb: CallbackQuery):
+    try:
+        if not await ensure_admin(cb.from_user.id):
+            await cb.answer(t("access_denied", await _user_lang(cb.from_user.id)), show_alert=True)
+            return
+        config = await get_advert_config()
+        await set_advert_enabled(not config.is_enabled)
+        await cb.answer()
+        config = await get_advert_config()
+        status = "🟢 Включена" if config.is_enabled else "🔴 Выключена"
+        interval_min = config.interval_seconds // 60
+        await cb.message.edit_text(
+            "⚙️ <b>Настройки рассылки рекламы</b>\n\n"
+            f"📊 Статус: <b>{status}</b>\n"
+            f"⏱ Интервал: <b>{interval_min} мин</b>\n"
+            f"🕒 Последняя отправка: {config.last_sent_at.strftime('%d.%m.%Y %H:%M') if config.last_sent_at else '—'}\n\n"
+            "Реклама отправляется всем пользователям (кроме премиум и забаненных).",
+            reply_markup=ad_settings_kb(config),
+        )
+    except Exception as e:
+        logger.exception(f"ad_toggle_scheduler_cb error")
+
+
+@dp.callback_query(F.data == "ad_set_interval")
+async def ad_set_interval_cb(cb: CallbackQuery, state: FSMContext):
+    try:
+        if not await ensure_admin(cb.from_user.id):
+            await cb.answer(t("access_denied", await _user_lang(cb.from_user.id)), show_alert=True)
+            return
+        await cb.answer()
+        await state.set_state(AdIntervalStates.waiting)
+        await cb.message.edit_text(
+            "⏱ <b>Интервал рассылки</b>\n\n"
+            "Введи интервал в <b>минутах</b> (например: 30):",
+            reply_markup=_ad_cancel_kb(),
+        )
+    except Exception as e:
+        logger.exception(f"ad_set_interval_cb error")
+
+
+@dp.message(AdIntervalStates.waiting)
+async def ad_interval_received(message: Message, state: FSMContext):
+    text = message.text.strip()
+    if not text.isdigit() or int(text) <= 0:
+        await message.answer("⚠️ Введи положительное число (минут):", reply_markup=_ad_cancel_kb())
+        return
+    minutes = int(text)
+    await set_advert_interval(minutes * 60)
+    await state.clear()
+    config = await get_advert_config()
+    await message.answer(f"✅ Интервал рассылки установлен: <b>{minutes} мин</b>",
+                         reply_markup=back_kb("ad_settings"))

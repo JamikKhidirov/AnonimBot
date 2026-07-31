@@ -2,6 +2,7 @@ import logging
 import html
 
 from aiogram import F
+from aiogram.fsm.context import FSMContext
 from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
 
 from bot import bot, dp, get_bot_username
@@ -44,8 +45,11 @@ def _extract_content(message: Message) -> tuple:
 
 
 @dp.message(~F.reply_to_message)
-async def handle_anonymous_message(message: Message):
+async def handle_anonymous_message(message: Message, state: FSMContext):
     if message.from_user.id == (await bot.get_me()).id:
+        return
+
+    if await state.get_state():
         return
 
     if await is_banned(message.from_user.id):
@@ -114,7 +118,10 @@ async def handle_anonymous_message(message: Message):
 
 
 @dp.message(F.reply_to_message)
-async def handle_reply_to_anonymous(message: Message):
+async def handle_reply_to_anonymous(message: Message, state: FSMContext):
+    if await state.get_state():
+        return
+
     replied = message.reply_to_message
     if not replied or replied.from_user.id != bot.id:
         return

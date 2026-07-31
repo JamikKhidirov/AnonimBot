@@ -115,17 +115,21 @@ class AdvertConfig(Base):
     __tablename__ = "advert_config"
 
     id = Column(Integer, primary_key=True)
-    interval_seconds = Column(Integer, default=600)
+    interval_seconds = Column(Integer, default=1800)
     last_sent_at = Column(DateTime, nullable=True)
+    is_enabled = Column(Boolean, default=False)
 
 
 class Advert(Base):
     __tablename__ = "adverts"
 
     id = Column(Integer, primary_key=True)
+    name = Column(String(200), nullable=True)
     text = Column(Text, nullable=True)
+    photo_file_id = Column(String(512), nullable=True)
     video_file_id = Column(String(512), nullable=True)
-    buttons_json = Column(Text, nullable=True)
+    button_text = Column(String(100), nullable=True)
+    button_url = Column(String(500), nullable=True)
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
@@ -165,6 +169,11 @@ async def init_db():
         ("messages", "file_id", "VARCHAR(512)"),
         ("users", "referral_code", "VARCHAR(64)"),
         ("users", "referral_bonus_until", "DATETIME"),
+        ("adverts", "name", "VARCHAR(200)"),
+        ("adverts", "photo_file_id", "VARCHAR(512)"),
+        ("adverts", "button_text", "VARCHAR(100)"),
+        ("adverts", "button_url", "VARCHAR(500)"),
+        ("advert_config", "is_enabled", "BOOLEAN DEFAULT 0"),
     ]
     for table, column, col_type in migrations:
         try:
@@ -674,6 +683,12 @@ async def get_all_adverts() -> list[Advert]:
         return list(result.scalars().all())
 
 
+async def get_advert_by_id(advert_id: int) -> Advert | None:
+    async with async_session() as session:
+        result = await session.execute(select(Advert).where(Advert.id == advert_id))
+        return result.scalar_one_or_none()
+
+
 async def update_advert(advert_id: int, **kwargs):
     async with async_session() as session:
         result = await session.execute(select(Advert).where(Advert.id == advert_id))
@@ -684,13 +699,52 @@ async def update_advert(advert_id: int, **kwargs):
             await session.commit()
 
 
-async def create_advert(text: str | None = None, video_file_id: str | None = None) -> Advert:
+async def delete_advert(advert_id: int):
     async with async_session() as session:
-        ad = Advert(text=text, video_file_id=video_file_id)
+        await session.execute(delete(Advert).where(Advert.id == advert_id))
+        await session.commit()
+
+
+async def create_advert(
+    name: str | None = None,
+    text: str | None = None,
+    photo_file_id: str | None = None,
+    video_file_id: str | None = None,
+    button_text: str | None = None,
+    button_url: str | None = None,
+) -> Advert:
+    async with async_session() as session:
+        ad = Advert(
+            name=name,
+            text=text,
+            photo_file_id=photo_file_id,
+            video_file_id=video_file_id,
+            button_text=button_text,
+            button_url=button_url,
+        )
         session.add(ad)
         await session.commit()
         await session.refresh(ad)
         return ad
+
+
+async def set_advert_enabled(enabled: bool):
+    async with async_session() as session:
+        result = await session.execute(select(AdvertConfig).limit(1))
+        config = result.scalar_one_or_none()
+        if not config:
+            config = AdvertConfig(is_enabled=enabled)
+            session.add(config)
+        else:
+            config.is_enabled = enabled
+        await session.commit()
+
+
+async def is_advert_enabled() -> bool:
+    async with async_session() as session:
+        result = await session.execute(select(AdvertConfig).limit(1))
+        config = result.scalar_one_or_none()
+        return bool(config and config.is_enabled)
 
 
 # ───── Premium ─────
