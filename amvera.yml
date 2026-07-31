@@ -1,12 +1,11 @@
----
 meta:
   environment: python
-  name: anonimbotjassi
+  toolchain:
+    name: pip
+    version: "3.12"
 build:
-  commands:
-    - pip install -r requirements.txt
+  requirementsPath: requirements.txt
+  useCache: false
 run:
   command: python main.py
-  workdir: /app
-data:
-  - /data
+  persistenceMount: /data
