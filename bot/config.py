@@ -24,4 +24,10 @@ if not BOT_TOKEN:
     print("ERROR: BOT_TOKEN в .env не указан")
     sys.exit(1)
 
-DATABASE_URL: str = "sqlite+aiosqlite:///anonim_bot.db"
+DATA_DIR: str = os.path.join(BASE_DIR, "data")
+os.makedirs(DATA_DIR, exist_ok=True)
+
+DATABASE_URL: str = os.getenv(
+    "DATABASE_URL",
+    f"sqlite+aiosqlite:///{os.path.join(DATA_DIR, 'anonim_bot.db').replace(os.sep, '/')}",
+)
