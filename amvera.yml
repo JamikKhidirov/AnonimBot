@@ -9,4 +9,4 @@ run:
   command: python main.py
   workdir: /app
 data:
-  - /app/data
+  - /data

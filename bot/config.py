@@ -24,7 +24,10 @@ if not BOT_TOKEN:
     print("ERROR: BOT_TOKEN в .env не указан")
     sys.exit(1)
 
-DATA_DIR: str = os.path.join(BASE_DIR, "data")
+if os.path.isdir("/data"):
+    DATA_DIR: str = "/data"
+else:
+    DATA_DIR: str = os.path.join(BASE_DIR, "data")
 os.makedirs(DATA_DIR, exist_ok=True)
 
 DATABASE_URL: str = os.getenv(
