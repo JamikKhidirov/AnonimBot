@@ -182,6 +182,7 @@ def ad_view_kb(ad_id: int, back_cb: str | None = None) -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="✏️ Редактировать", callback_data=f"ad_edit_menu:{ad_id}:{back_from_view}")],
         [InlineKeyboardButton(text="🔄 Вкл / Выкл", callback_data=f"ad_toggle:{ad_id}:{back_from_view}")],
         [InlineKeyboardButton(text="📤 Отправить сейчас", callback_data=f"ad_send_now:{ad_id}")],
+        [InlineKeyboardButton(text="👁 Предпросмотр", callback_data=f"ad_preview:{ad_id}:{back_from_view}")],
         [InlineKeyboardButton(text="🗑 Удалить", callback_data=f"ad_delete:{ad_id}:{back_from_view}")],
         [InlineKeyboardButton(text="◀ Назад", callback_data=back_cb or "ad_list:0")],
     ])

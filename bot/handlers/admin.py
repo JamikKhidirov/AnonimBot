@@ -1235,6 +1235,29 @@ async def ad_delete_confirm_cb(cb: CallbackQuery):
 
 # ─── Отправка сейчас ───
 
+@dp.callback_query(F.data.startswith("ad_preview:"))
+async def ad_preview_cb(cb: CallbackQuery):
+    try:
+        if not await ensure_admin(cb.from_user.id):
+            await cb.answer(t("access_denied", await _user_lang(cb.from_user.id)), show_alert=True)
+            return
+        await cb.answer()
+        parts = cb.data.split(":")
+        ad_id = int(parts[1])
+        back_cb = ":".join(parts[2:]) if len(parts) > 2 else ""
+        from bot.ad_scheduler import _send_ad
+        ad = await get_advert_by_id(ad_id)
+        if not ad:
+            await cb.message.edit_text("❌ Реклама не найдена.", reply_markup=back_kb("ad_list:0"))
+            return
+        ok, reason = await _send_ad(cb.from_user.id, ad)
+        text = "✅ <b>Предпросмотр отправлен тебе — проверь!</b>" if ok \
+            else f"❌ <b>Не удалось отправить:</b>\n<code>{reason}</code>"
+        await cb.message.edit_text(text, reply_markup=back_kb(back_cb or f"ad_view:{ad_id}"))
+    except Exception as e:
+        logger.exception(f"ad_preview_cb error")
+
+
 @dp.callback_query(F.data.startswith("ad_send_now:"))
 async def ad_send_now_cb(cb: CallbackQuery):
     try:
@@ -1245,14 +1268,11 @@ async def ad_send_now_cb(cb: CallbackQuery):
         ad_id = int(cb.data.split(":")[1])
         await cb.message.edit_text("📤 <b>Отправляю рекламу...</b>")
         from bot.ad_scheduler import send_ad_now
-        sent, total = await send_ad_now(ad_id)
+        res = await send_ad_now(ad_id)
         ad = await get_advert_by_id(ad_id)
-        logger.info(f"ad_send_now(ad={ad_id}): sent={sent} of total={total}")
-        not_sent = total - sent
+        logger.info(f"ad_send_now(ad={ad_id}): sent={res['sent']} of total={res['total']}")
         await cb.message.edit_text(
-            f"✅ <b>Рассылка завершена!</b>\n\n"
-            f"📤 Отправлено: <b>{sent}</b>\n"
-            f"⛔ Не отправлено: <b>{not_sent}</b> (всего юзеров: {total})",
+            _ad_result_text(res),
             reply_markup=ad_view_kb(ad_id) if ad else back_kb("ad_list:0"),
         )
     except Exception as e:
@@ -1268,17 +1288,35 @@ async def ad_send_now_active_cb(cb: CallbackQuery):
         await cb.answer()
         await cb.message.edit_text("📤 <b>Отправляю активную рекламу...</b>")
         from bot.ad_scheduler import send_active_ad_now
-        sent, total = await send_active_ad_now()
-        logger.info(f"ad_send_now_active: sent={sent} of total={total}")
-        not_sent = total - sent
+        res = await send_active_ad_now()
+        logger.info(f"ad_send_now_active: sent={res['sent']} of total={res['total']}")
         await cb.message.edit_text(
-            f"✅ <b>Рассылка завершена!</b>\n\n"
-            f"📤 Отправлено: <b>{sent}</b>\n"
-            f"⛔ Не отправлено: <b>{not_sent}</b> (всего юзеров: {total})",
+            _ad_result_text(res),
             reply_markup=back_kb("ad_settings"),
         )
     except Exception as e:
         logger.exception(f"ad_send_now_active_cb error")
+
+
+def _ad_result_text(res: dict) -> str:
+    total = res["total"]
+    sent = res["sent"]
+    not_sent = total - sent
+    lines = [
+        "✅ <b>Рассылка завершена!</b>",
+        "",
+        f"📤 Отправлено: <b>{sent}</b>",
+        f"⛔ Не отправлено: <b>{not_sent}</b> (всего юзеров: {total})",
+    ]
+    if res.get("skipped"):
+        lines.append(f"↩️ Пропущено (premium/бан): <b>{res['skipped']}</b>")
+    errors = res.get("errors") or {}
+    if errors:
+        lines.append("")
+        lines.append("⚠️ <b>Причины ошибок:</b>")
+        for reason, count in sorted(errors.items(), key=lambda x: -x[1])[:3]:
+            lines.append(f"• {reason} — {count}")
+    return "\n".join(lines)
 
 
 # ─── Редактирование рекламы ───
