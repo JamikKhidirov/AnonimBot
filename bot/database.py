@@ -511,6 +511,18 @@ async def get_sender_message_count(sender_id: int) -> int:
         return result.scalar()
 
 
+async def get_greeting_for_sender(link_id: int, sender_id: int) -> Message | None:
+    """Returns the visitor's welcome message for this owner-link (dedup of first visit)."""
+    async with async_session() as session:
+        result = await session.execute(
+            select(Message)
+            .where(Message.link_id == link_id, Message.sender_id == sender_id,
+                   Message.content_type == "greeting")
+            .order_by(Message.id.desc()).limit(1)
+        )
+        return result.scalar_one_or_none()
+
+
 async def set_message_rating(message_id: int, stars: int):
     """Owner rates an anonymous message 1-5 (stars capped, 0 resets)."""
     stars = max(0, min(5, int(stars)))

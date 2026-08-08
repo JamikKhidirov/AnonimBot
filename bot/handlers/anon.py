@@ -73,11 +73,11 @@ def _delivery_kb(msg_id: int, lang: str, whois: bool, rated: int = 0) -> InlineK
         )])
     if rated:
         rows.append([InlineKeyboardButton(
-            text=stars(rated), callback_data=f"rate:{msg_id}",
+            text="⭐ Переоценить: " + stars(rated), callback_data=f"rate:{msg_id}",
         )])
     else:
         rows.append(
-            [InlineKeyboardButton(text=str(s), callback_data=f"rate:{msg_id}:{s}")
+            [InlineKeyboardButton(text=f"⭐ {s}", callback_data=f"rate:{msg_id}:{s}")
              for s in range(1, 6)]
         )
     return InlineKeyboardMarkup(inline_keyboard=rows)
@@ -92,25 +92,29 @@ async def _deliver_to_owner(plan: dict) -> list[tuple[int, int]]:
     kb = _delivery_kb(plan["msg_id"], owner_lang, bool(plan.get("whois")))
 
     if kind == "text":
-        body = head(t("new_anon_title", owner_lang)) + "\n\n" + t("new_anon_body", owner_lang).format(text=plan["text"])
+        if plan.get("greeting"):
+            title = t("new_visitor_title", owner_lang)
+        else:
+            title = t("new_anon_title", owner_lang)
+        body = head(title) + "\n\n" + t("new_anon_body", owner_lang).format(text=html.escape(plan["text"]))
         sent = await bot.send_message(owner_tg_id, body, reply_markup=kb)
         return [(sent.message_id, owner_tg_id)]
 
     if kind == "album":
         media_group = [
-            InputMediaPhoto(media=f, caption=(plan.get("text") or "" if i == 0 else None))
+            InputMediaPhoto(media=f, caption=(html.escape(plan.get("text") or "") if i == 0 else None))
             for i, f in enumerate(plan["files"])
         ]
         sent_list = await bot.send_media_group(owner_tg_id, media_group)
         result = [(s.message_id, owner_tg_id) for s in sent_list]
-        note = t("new_anon_media", owner_lang).format(text=plan.get("text") or "")
+        note = t("new_anon_media", owner_lang).format(text=html.escape(plan.get("text") or ""))
         sent = await bot.send_message(owner_tg_id, note, reply_markup=kb)
         result.append((sent.message_id, owner_tg_id))
         return result
 
     media_copy = await plan["message_ref"].copy_to(owner_tg_id)
     result = [(media_copy.message_id, owner_tg_id)]
-    note = t("new_anon_media", owner_lang).format(text=plan.get("text") or "")
+    note = t("new_anon_media", owner_lang).format(text=html.escape(plan.get("text") or ""))
     sent = await bot.send_message(owner_tg_id, note, reply_markup=kb)
     result.append((sent.message_id, owner_tg_id))
     return result
@@ -130,6 +134,34 @@ async def _deliver_and_confirm(plan: dict, message_ref: Message | None, reply_to
         f"ANON delivered ({plan['kind']}): sender={plan.get('sender_id')} "
         f"-> owner={plan['owner_id']}: {(plan.get('text') or '')[:100]}"
     )
+
+
+async def deliver_welcome_to_owner(owner, link, sender_user, greeting_text: str):
+    """First-join welcome: delivers a replyable 'new guest' message to the owner."""
+    msg = await create_message(
+        link_id=link.id,
+        sender_id=sender_user.telegram_id,
+        text=greeting_text,
+        content_type="greeting",
+        sender_username=sender_user.username,
+        sender_full_name=sender_user.full_name,
+    )
+    plan = {
+        "kind": "text",
+        "msg_id": msg.id,
+        "text": greeting_text,
+        "owner_id": owner.telegram_id,
+        "owner_lang": owner.language or "ru",
+        "whois": user_can_see_whois(owner),
+        "sender_id": sender_user.telegram_id,
+        "sender_lang": sender_user.language or "ru",
+        "greeting": True,
+    }
+    try:
+        await _deliver_and_confirm(plan, None, None)
+    except Exception as e:
+        logger.exception(f"WELCOME delivery failed msg={msg.id}: {type(e).__name__}: {e}")
+    return msg
 
 
 async def _finalize_album(

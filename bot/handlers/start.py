@@ -6,10 +6,11 @@ from bot import bot, dp, get_bot_username
 from bot.database import (
     get_or_create_user, get_or_create_link, get_link_by_code, set_active_session,
     get_or_create_referral_code, process_referral, get_referral_count, bump_link_view,
-    get_referral_leaderboard, detect_language,
+    get_referral_leaderboard, detect_language, get_greeting_for_sender,
 )
 from bot.locales import t
 from bot.keyboards import stop_session_kb
+from bot.handlers.anon import deliver_welcome_to_owner
 
 
 def _link_kb(url: str) -> InlineKeyboardMarkup:
@@ -124,15 +125,10 @@ async def _handle_deep_link(message: Message, user, code: str, lang: str):
     await bump_link_view(link.id)
     await set_active_session(message.from_user.id, code)
     owner = link.user
-    if owner.custom_greeting:
-        await message.answer(owner.custom_greeting, reply_markup=stop_session_kb(lang))
-    else:
-        await message.answer(t("chat_started", lang), reply_markup=stop_session_kb(lang))
-    owner_lang = owner.language or "ru"
-    await bot.send_message(
-        owner.telegram_id,
-        t("new_visitor", owner_lang),
-    )
+    greeting_text = owner.custom_greeting or t("chat_started", lang)
+    await message.answer(greeting_text, reply_markup=stop_session_kb(lang))
+    if await get_greeting_for_sender(link.id, message.from_user.id) is None:
+        await deliver_welcome_to_owner(owner, link, user, greeting_text)
 
 
 @dp.callback_query(F.data == "bonuses")
