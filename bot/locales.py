@@ -216,10 +216,14 @@ _t = {
         "referral_info": (
             "━━━━━━━━━━━━━━━\n"
             "👥 <b>Реферальная программа</b>\n\n"
-            "Пригласи друга по ссылке ниже и получи <b>3 дня</b> "
+            "Пригласи друга по ссылке ниже и получи <b>10 часов</b> "
             "просмотра отправителей анонимных сообщений!\n\n"
             "🔗 <code>{link}</code>\n\n"
-            "🗓 <i>Бонус суммируется — за каждого друга +3 дня.</i>"
+            "🗓 <i>Бонус суммируется — за каждого друга +10 часов.</i>\n\n"
+            "🏆 <b>Лесенка наград</b>\n"
+            "• 3 друга → +неделя просмотра\n"
+            "• 10 друзей → скидка 50% на Premium\n"
+            "• 25 друзей → Premium на месяц"
         ),
         "referral_text": (
             "🎉 <b>Добро пожаловать по реферальной ссылке!</b>\n\n"
@@ -228,12 +232,12 @@ _t = {
             "📌 <b>Твоя ссылка для анонимных сообщений:</b>\n"
             "<code>{link}</code>\n\n"
             "Отправь эту ссылку друзьям, и они смогут писать тебе анонимно!\n"
-            "А твой друг уже получил <b>+3 дня</b> бонуса за то, что пригласил тебя."
+            "А твой друг уже получил <b>+10 часов</b> бонуса за то, что пригласил тебя."
         ),
-        "referral_welcome": "🎉 Ты пришёл по реферальной ссылке! Твой друг получил 3 дня бонуса.",
+        "referral_welcome": "🎉 Ты пришёл по реферальной ссылке! Твой друг получил 10 часов бонуса.",
         "referral_bonus_gained": (
             "🎉 <b>По твоей реферальной ссылке перешёл новый пользователь!</b>\n\n"
-            "✅ Ты получил <b>+3 дня</b> просмотра отправителей анонимных сообщений.\n"
+            "✅ Ты получил <b>+10 часов</b> просмотра отправителей анонимных сообщений.\n"
             "Теперь ты можешь видеть, кто тебе написал!"
         ),
     },
@@ -452,13 +456,17 @@ _t = {
         "link_reset_cancelled": "Reset cancelled.",
 
         # Referral
-        "referral_info": (
+"referral_info": (
             "━━━━━━━━━━━━━━━\n"
-            "👥 <b>Referral Program</b>\n\n"
-            "Invite a friend using the link below and get <b>3 days</b> "
-            "of seeing who sent you anonymous messages!\n\n"
+            "👥 <b>Referral program</b>\n\n"
+            "Invite a friend with the link below and get <b>10 hours</b> "
+            "of seeing anonymous message senders!\n\n"
             "🔗 <code>{link}</code>\n\n"
-            "🗓 <i>Bonus stacks — +3 days per friend.</i>"
+            "🗓 <i>Bonuses stack — +10 hours per friend.</i>\n\n"
+            "🏆 <b>Reward ladder</b>\n"
+            "• 3 friends → +1 week of whois\n"
+            "• 10 friends → 50% Premium discount\n"
+            "• 25 friends → 1 month of Premium"
         ),
         "referral_text": (
             "🎉 <b>Welcome via referral link!</b>\n\n"
@@ -467,12 +475,12 @@ _t = {
             "📌 <b>Your link for anonymous messages:</b>\n"
             "<code>{link}</code>\n\n"
             "Share this link with friends so they can write to you anonymously!\n"
-            "Your friend already got <b>+3 days</b> bonus for inviting you."
+            "Your friend already got <b>+10 hours</b> bonus for inviting you."
         ),
-        "referral_welcome": "🎉 You came through a referral link! Your friend got 3 days of bonus.",
-        "referral_bonus_gained": (
+        "referral_welcome": "🎉 You came through a referral link! Your friend got 10 hours of bonus.",
+"referral_bonus_gained": (
             "🎉 <b>A new user came through your referral link!</b>\n\n"
-            "✅ You received <b>+3 days</b> of seeing anonymous message senders.\n"
+            "✅ You received <b>+10 hours</b> of seeing anonymous message senders.\n"
             "Now you can see who wrote to you!"
         ),
     },

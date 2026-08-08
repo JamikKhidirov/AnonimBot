@@ -27,6 +27,8 @@ from bot.database import (
     get_premium_plans, add_premium_plan, remove_premium_plan,
     set_premium, remove_premium, is_premium,
     set_premium_plus, log_audit, get_audit_log,
+    mute_sender, unmute_sender, is_muted,
+    get_channel_gate, set_channel_gate,
 )
 from bot.locales import t, role_label
 from bot.keyboards import (
@@ -514,6 +516,13 @@ async def whois_callback(cb: CallbackQuery):
         is_admin = user.is_admin or user.is_developer
 
         buttons = []
+        muted = await is_muted(cb.from_user.id, sender_id)
+        mute_label = "🔊 Показывать его сообщения" if muted else "🔇 Скрыть его сообщения"
+        mute_extra = f":{back_cb}" if back_cb else ""
+        buttons.append([InlineKeyboardButton(
+            text=mute_label,
+            callback_data=f"mute_toggle:{sender_id}:{msg_id}{mute_extra}",
+        )])
         if is_admin:
             buttons.append([InlineKeyboardButton(
                 text="✉️ Все сообщения отправителя",
@@ -540,6 +549,25 @@ async def whois_callback(cb: CallbackQuery):
             await cb.message.edit_text(f"❌ Ошибка: {e}", reply_markup=back_kb())
         except Exception:
             pass
+
+
+@dp.callback_query(F.data.startswith("mute_toggle:"))
+async def mute_toggle_callback(cb: CallbackQuery):
+    try:
+        parts = cb.data.split(":")
+        sender_id = int(parts[1])
+        owner_id = cb.from_user.id
+        muted = await is_muted(owner_id, sender_id)
+        if muted:
+            await unmute_sender(owner_id, sender_id)
+            await cb.answer("🔊 Сообщения от этого анонима снова показываются.")
+        else:
+            await mute_sender(owner_id, sender_id)
+            await cb.answer("🔇 Теперь сообщения от этого анонима будут скрываться.")
+        cb.data = "whois:" + ":".join(parts[2:])
+        await whois_callback(cb)
+    except Exception as e:
+        logger.exception(f"mute_toggle_callback error: data={cb.data}")
 
 
 @dp.callback_query(F.data.startswith("whois_back:"))
@@ -963,6 +991,51 @@ async def remove_plus_command(message: Message):
     await set_premium_plus(target_id, False)
     await log_audit(message.from_user.id, "remove_plus", f"user={target_id}")
     await message.answer(f"⭐ Premium Plus отозван у <code>{target_id}</code>.")
+
+
+@dp.message(Command("setgate"))
+async def set_gate_command(message: Message):
+    if not is_dev(message.from_user.id):
+        await message.answer(t("access_denied", await _user_lang(message.from_user.id)))
+        return
+    args = message.text.split(maxsplit=1)
+    if len(args) < 2 or not args[1].strip():
+        await message.answer(
+            "🔒 <b>Принудительная подписка на канал</b>\n\n"
+            "Установить:\n<code>/setgate @my_channel</code>\n"
+            "Отключить:\n<code>/setgate -</code>\n\n"
+            "⚠️ Бот должен быть добавлен в канал участником, иначе проверка не сработает."
+        )
+        return
+    raw = args[1].strip()
+    if raw == "-":
+        await set_channel_gate(None)
+        await log_audit(message.from_user.id, "gate_off", "")
+        await message.answer("🔓 Принудительная подписка отключена.")
+        return
+    ch = raw.lstrip("@").split("/")[-1].strip()
+    if not ch:
+        await message.answer("❌ Неверное имя канала.")
+        return
+    await set_channel_gate(ch)
+    await log_audit(message.from_user.id, "gate_on", f"channel={ch}")
+    await message.answer(
+        f"🔒 Гейт включён: <b>t.me/{ch}</b>\n\n"
+        f"Теперь анонимы должны подписаться на канал, прежде чем писать.\n"
+        f"⚠️ Проверь, что бот добавлен в канал участником."
+    )
+
+
+@dp.message(Command("gate"))
+async def gate_status_command(message: Message):
+    if not is_dev(message.from_user.id):
+        await message.answer(t("access_denied", await _user_lang(message.from_user.id)))
+        return
+    gate = await get_channel_gate()
+    if gate:
+        await message.answer(f"🔒 Гейт активен: <b>t.me/{gate.channel}</b>")
+    else:
+        await message.answer("🔓 Гейт отключён.")
 
 
 @dp.message(Command("export_csv"))

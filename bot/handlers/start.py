@@ -6,7 +6,7 @@ from bot import bot, dp, get_bot_username
 from bot.database import (
     get_or_create_user, get_or_create_link, get_link_by_code, set_active_session,
     get_or_create_referral_code, process_referral, get_referral_count, bump_link_view,
-    get_referral_leaderboard,
+    get_referral_leaderboard, detect_language,
 )
 from bot.locales import t
 from bot.keyboards import stop_session_kb
@@ -34,6 +34,7 @@ async def start_handler(message: Message, command: CommandStart):
         message.from_user.id,
         message.from_user.username,
         message.from_user.full_name,
+        language=detect_language(message.from_user.language_code),
     )
     lang = user.language or "ru"
 
@@ -58,7 +59,8 @@ async def start_handler(message: Message, command: CommandStart):
 
 
 async def _handle_referral(message: Message, user, code: str, lang: str):
-    referrer = await process_referral(message.from_user.id, code)
+    result = await process_referral(message.from_user.id, code)
+    referrer, milestones = (result if result else (None, []))
 
     link = await get_or_create_link(user.id)
     share_url = f"https://t.me/{get_bot_username()}?start={link.code}"
@@ -69,6 +71,17 @@ async def _handle_referral(message: Message, user, code: str, lang: str):
             referrer.telegram_id,
             t("referral_bonus_gained", owner_lang),
         )
+        if milestones:
+            names = {
+                "3": "🏆 3 друга — <b>+неделя</b> просмотра отправителей",
+                "10": "🏆 10 друзей — <b>скидка 50%</b> на Premium",
+                "25": "🏆 25 друзей — <b>Premium на месяц</b>",
+            }
+            await bot.send_message(
+                referrer.telegram_id,
+                "🎉 <b>Новое достижение в реферальной программе!</b>\n\n" +
+                "\n".join(names[m] for m in milestones if m in names),
+            )
         text = t("referral_text", lang).format(link=share_url)
 
         referrer_link = await get_or_create_link(referrer.id)
@@ -151,6 +164,17 @@ async def bonuses_callback(cb):
         if not lb_lines:
             lb_lines.append("   пока никто никого не пригласил")
 
+        ladder = [
+            ("✅" if ref_count >= 3 else "▫️") + " 3 друга — <b>+неделя</b> просмотра",
+            ("✅" if ref_count >= 10 else "▫️") + " 10 друзей — <b>скидка 50%</b> на Premium",
+            ("✅" if ref_count >= 25 else "▫️") + " 25 друзей — <b>Premium на месяц</b>",
+        ]
+
+        next_target = 3 if ref_count < 3 else 10 if ref_count < 10 else 25 if ref_count < 25 else None
+        if next_target:
+            ladder.append("")
+            ladder.append(f"🎯 До следующей награды: <b>{next_target - ref_count}</b> друг(а)")
+
         text = (
             "🎁 <b>Твои бонусы</b>\n\n"
             f"👥 Приглашено друзей: <b>{ref_count}</b>\n"
@@ -158,8 +182,9 @@ async def bonuses_callback(cb):
             "━━━━━━━━━━━━━━━\n"
             "📋 <b>Твоя реферальная ссылка:</b>\n"
             f"<code>{ref_url}</code>\n\n"
-            "Скопируй и отправь другу!\n"
-            "За каждого друга ты получишь <b>+3 дня</b> просмотра.\n\n"
+            "За каждого друга ты получишь <b>+10 часов</b> просмотра.\n\n"
+            "━━━━━━━━━━━━━━━\n"
+            "🏆 <b>Лесенка наград:</b>\n" + "\n".join(ladder) + "\n\n"
             "━━━━━━━━━━━━━━━\n"
             "🏆 <b>Топ приглашающих:</b>\n" + "\n".join(lb_lines)
         )

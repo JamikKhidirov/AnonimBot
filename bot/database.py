@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 
 from sqlalchemy import (
     Column, Integer, BigInteger, String, Text, Boolean,
-    DateTime, ForeignKey, select, delete, func, or_, text,
+    DateTime, ForeignKey, select, delete, func, or_, text, UniqueConstraint,
 )
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 from sqlalchemy.orm import DeclarativeBase, relationship, selectinload
@@ -30,6 +30,7 @@ class User(Base):
     referral_code = Column(String(64), unique=True, nullable=True)
     referral_bonus_until = Column(DateTime, nullable=True)
     premium_plus = Column(Boolean, default=False)
+    ladder_rewarded = Column(Integer, default=0)
     custom_greeting = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
@@ -103,6 +104,27 @@ class BannedUser(Base):
     reason = Column(String(500), nullable=True)
     banned_by = Column(BigInteger, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class MutedSender(Base):
+    """Owner muted a specific anonymous sender (mute by sender, not ban everyone)."""
+    __tablename__ = "muted_senders"
+
+    id = Column(Integer, primary_key=True)
+    owner_tg_id = Column(BigInteger, nullable=False)
+    sender_id = Column(BigInteger, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    __table_args__ = (UniqueConstraint("owner_tg_id", "sender_id", name="uq_muted"),)
+
+
+class ChannelGate(Base):
+    """Optional required-subscription channel. When set, anonymous users must subscribe first."""
+    __tablename__ = "channel_gate"
+
+    id = Column(Integer, primary_key=True)
+    channel = Column(String(255), nullable=False)
+    is_active = Column(Boolean, default=True)
 
 
 class Referral(Base):
@@ -198,6 +220,7 @@ async def init_db():
         ("advert_config", "is_enabled", "BOOLEAN DEFAULT 0"),
         ("users", "premium_plus", "BOOLEAN DEFAULT 0"),
         ("users", "custom_greeting", "TEXT"),
+        ("users", "ladder_rewarded", "INTEGER DEFAULT 0"),
         ("chat_links", "view_count", "INTEGER DEFAULT 0"),
     ]
     for table, column, col_type in migrations:
@@ -211,7 +234,12 @@ async def init_db():
             pass  # column already exists
 
 
-async def get_or_create_user(telegram_id: int, username: str | None, full_name: str | None) -> User:
+async def get_or_create_user(
+    telegram_id: int,
+    username: str | None,
+    full_name: str | None,
+    language: str | None = None,
+) -> User:
     from sqlalchemy.exc import IntegrityError
     async with async_session() as session:
         result = await session.execute(select(User).where(User.telegram_id == telegram_id))
@@ -226,6 +254,8 @@ async def get_or_create_user(telegram_id: int, username: str | None, full_name: 
             await session.refresh(user)
             return user
         user = User(telegram_id=telegram_id, username=username, full_name=full_name)
+        if language:
+            user.language = language
         if telegram_id == DEVELOPER_ID:
             user.is_developer = True
             user.is_admin = True
@@ -599,6 +629,13 @@ async def get_link_count() -> int:
 
 # ───── Language ─────
 
+def detect_language(lang_code: str | None) -> str:
+    """Maps Telegram language_code (e.g. 'en-US') to bot locale ('ru'/'en')."""
+    if lang_code and lang_code.lower().startswith("en"):
+        return "en"
+    return "ru"
+
+
 async def set_user_language(telegram_id: int, lang: str):
     async with async_session() as session:
         result = await session.execute(select(User).where(User.telegram_id == telegram_id))
@@ -606,6 +643,68 @@ async def set_user_language(telegram_id: int, lang: str):
         if user:
             user.language = lang
             await session.commit()
+
+
+# ───── Mute by owner ─────
+
+async def mute_sender(owner_tg_id: int, sender_id: int):
+    async with async_session() as session:
+        exists = await session.execute(
+            select(MutedSender).where(
+                MutedSender.owner_tg_id == owner_tg_id,
+                MutedSender.sender_id == sender_id,
+            )
+        )
+        if not exists.scalar_one_or_none():
+            from sqlalchemy.exc import IntegrityError
+            try:
+                session.add(MutedSender(owner_tg_id=owner_tg_id, sender_id=sender_id))
+                await session.commit()
+            except IntegrityError:
+                await session.rollback()
+
+
+async def unmute_sender(owner_tg_id: int, sender_id: int):
+    async with async_session() as session:
+        await session.execute(
+            delete(MutedSender).where(
+                MutedSender.owner_tg_id == owner_tg_id,
+                MutedSender.sender_id == sender_id,
+            )
+        )
+        await session.commit()
+
+
+async def is_muted(owner_tg_id: int, sender_id: int) -> bool:
+    async with async_session() as session:
+        result = await session.execute(
+            select(MutedSender).where(
+                MutedSender.owner_tg_id == owner_tg_id,
+                MutedSender.sender_id == sender_id,
+            )
+        )
+        return result.scalar_one_or_none() is not None
+
+
+# ───── Channel gate (subscribe to use) ─────
+
+async def get_channel_gate() -> ChannelGate | None:
+    async with async_session() as session:
+        result = await session.execute(
+            select(ChannelGate).where(ChannelGate.is_active == True).limit(1)
+        )
+        return result.scalar_one_or_none()
+
+
+async def set_channel_gate(channel: str | None):
+    """Set or disable (None) the required channel for sending messages."""
+    async with async_session() as session:
+        await session.execute(
+            delete(ChannelGate).where(ChannelGate.is_active == True)
+        )
+        if channel:
+            session.add(ChannelGate(channel=channel, is_active=True))
+        await session.commit()
 
 
 # ───── Ban ─────
@@ -704,34 +803,82 @@ async def get_or_create_referral_code(telegram_id: int) -> str:
         return user.referral_code
 
 
-async def process_referral(referee_tg_id: int, referral_code: str) -> User | None:
+async def process_referral(referee_tg_id: int, referral_code: str) -> tuple[User | None, list[str]]:
+    """Registers a referral, grants +10 hours of whois bonus and ladder milestones.
+
+    Ladder:
+      - 3 friends  -> extra week of 'whois' bonus
+      - 10 friends -> 50% discount on Premium
+      - 25 friends -> 1 month of Premium
+    Returns (referrer or None, list of milestone labels won).
+"""
+    if not referral_code:
+        return None, []
     async with async_session() as session:
         result = await session.execute(select(User).where(User.referral_code == referral_code))
         referrer = result.scalar_one_or_none()
         if not referrer:
-            return None
+            return None, []
 
         result = await session.execute(select(User).where(User.telegram_id == referee_tg_id))
         referee = result.scalar_one_or_none()
         if not referee or referrer.id == referee.id:
-            return None
+            return None, []
 
         existing = await session.execute(
             select(Referral).where(Referral.referee_id == referee.id)
         )
         if existing.scalar_one_or_none():
-            return None
+            return None, []
 
         session.add(Referral(referrer_id=referrer.id, referee_id=referee.id))
 
         now = datetime.utcnow()
         if referrer.referral_bonus_until and referrer.referral_bonus_until > now:
-            referrer.referral_bonus_until += timedelta(days=3)
+            referrer.referral_bonus_until += timedelta(hours=10)
         else:
-            referrer.referral_bonus_until = now + timedelta(days=3)
+            referrer.referral_bonus_until = now + timedelta(hours=10)
 
+        count_result = await session.execute(
+            select(func.count(Referral.id)).where(Referral.referrer_id == referrer.id)
+        )
+        count = count_result.scalar() or 0
+
+        milestones = []
+        flags = referrer.ladder_rewarded or 0
+        if count >= 3 and not (flags & 1):
+            flags |= 1
+            referrer.referral_bonus_until = (referrer.referral_bonus_until or now) + timedelta(days=7)
+            milestones.append("3")
+
+        if count >= 10 and not (flags & 2):
+            flags |= 2
+            milestones.append("10")
+
+        if count >= 25 and not (flags & 4):
+            flags |= 4
+            sub = PremiumSubscription(
+                user_id=referrer.id,
+                end_date=now + timedelta(days=30),
+            )
+            session.add(sub)
+            milestones.append("25")
+
+        referrer.ladder_rewarded = flags
         await session.commit()
-        return referrer
+        return referrer, milestones
+
+
+async def grant_premium_days(user_tg_id: int, days: int):
+    async with async_session() as session:
+        result = await session.execute(select(User).where(User.telegram_id == user_tg_id))
+        user = result.scalar_one_or_none()
+        if user:
+            session.add(PremiumSubscription(
+                user_id=user.id,
+                end_date=datetime.utcnow() + timedelta(days=days),
+            ))
+            await session.commit()
 
 
 def user_can_see_whois(user: User) -> bool:

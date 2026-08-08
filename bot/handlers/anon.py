@@ -17,6 +17,7 @@ from bot.database import (
     user_can_see_whois,
     delete_message_row,
     get_forwarded_for_message, delete_forwarded_for_message,
+    detect_language, is_muted, get_channel_gate,
 )
 from bot.locales import t
 from bot.keyboards import stop_session_kb
@@ -25,6 +26,8 @@ logger = logging.getLogger(__name__)
 
 # Buffers for incoming photo albums: key = (sender_tg_id, media_group_id)
 _album_buffers: dict[tuple, dict] = {}
+# Held messages while user hasn't joined the required channel yet
+_held_gated: dict[int, tuple] = {}
 
 
 def _extract_content(message: Message) -> tuple:
@@ -151,6 +154,72 @@ async def _finalize_album(
         logger.exception(f"ANON album delivery failed msg={msg.id}: {type(e).__name__}: {e}")
 
 
+async def _build_plan(message: Message, link, owner, lang: str) -> tuple:
+    """Creates the DB message + delivery plan for a single-format message."""
+    text_content, content_type, file_id = _extract_content(message)
+    msg = await create_message(
+        link_id=link.id,
+        sender_id=message.from_user.id,
+        text=text_content,
+        content_type=content_type,
+        file_id=file_id,
+        sender_username=message.from_user.username,
+        sender_full_name=message.from_user.full_name,
+    )
+    plan = {
+        "kind": "text" if content_type == "text" else "media",
+        "msg_id": msg.id,
+        "text": text_content,
+        "file_id": file_id,
+        "owner_id": owner_tg_id_of(link),
+        "owner_lang": link.user.language or "ru",
+        "whois": user_can_see_whois(link.user),
+        "sender_id": message.from_user.id,
+        "sender_lang": lang,
+    }
+    return msg, plan
+
+
+def owner_tg_id_of(link):
+    return link.user.telegram_id if link and link.user else 0
+
+
+async def _is_subscribed_to_channel(user_id: int, channel: str) -> bool:
+    name = channel.lstrip("@")
+    try:
+        member = await bot.get_chat_member(f"@{name}", user_id)
+        return member.status in ("member", "administrator", "creator")
+    except Exception as e:
+        # Misconfigured gate (bot not in the channel) must not lock everyone out.
+        logger.warning(f"Channel gate check failed @{name}: {type(e).__name__}: {e}")
+        return True
+
+
+@dp.callback_query(F.data == "subs_check")
+async def subs_check_callback(cb):
+    try:
+        gate = await get_channel_gate()
+        if not gate:
+            return
+        await cb.answer()
+        if not await _is_subscribed_to_channel(cb.from_user.id, gate.channel):
+            await cb.answer("🔒 Ты ещё не подписан на канал. Сначала подпишись 👉", show_alert=True)
+            return
+        held = _held_gated.pop(cb.from_user.id, None)
+        if held:
+            plan, ref = held
+            try:
+                await _deliver_and_confirm(plan, ref, ref)
+                await cb.message.edit_text("✅ <b>Подписка подтверждена!</b>\nСообщение отправлено владельцу.")
+            except Exception as e:
+                logger.exception(f"subs_check delivery error")
+                await cb.message.edit_text("❌ Не удалось доставить сообщение. Напиши его ещё раз.")
+        else:
+            await cb.message.edit_text("✅ <b>Подписка подтверждена!</b>\nТеперь напиши своё сообщение.")
+    except Exception as e:
+        logger.exception(f"subs_check_callback error")
+
+
 @dp.message(~F.reply_to_message)
 async def handle_anonymous_message(message: Message, state: FSMContext):
     if message.from_user.id == (await bot.get_me()).id:
@@ -179,9 +248,32 @@ async def handle_anonymous_message(message: Message, state: FSMContext):
 
     owner = link.user
     sender_user = await get_or_create_user(
-        message.from_user.id, message.from_user.username, message.from_user.full_name
+        message.from_user.id, message.from_user.username, message.from_user.full_name,
+        language=detect_language(message.from_user.language_code),
     )
     lang = sender_user.language or "ru"
+
+    # ── Required-channel gate (subscribe to keep using the bot) ──
+    gate = await get_channel_gate()
+    if gate:
+        if not await _is_subscribed_to_channel(message.from_user.id, gate.channel):
+            _, plan = await _build_plan(message, link, owner, lang)
+            _held_gated[message.from_user.id] = (plan, message)
+            await message.answer(
+                "🔒 <b>Чтобы писать сообщения, сначала подпишись на канал</b>\n\n"
+                f"👉 <a href='https://t.me/{gate.channel.lstrip('@')}'>Канал</a>\n\n"
+                "После подписки нажми кнопку ниже — и твоё сообщение сразу отправится.",
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text="✅ Подписался, проверить", callback_data="subs_check")],
+                    [InlineKeyboardButton(text="◀ Выйти из чата", callback_data="stop_session")],
+                ]),
+            )
+            return
+
+    # ── Muted sender (owner muted this anon) ──
+    if await is_muted(owner.telegram_id, message.from_user.id):
+        await message.answer(t("msg_sent", lang), reply_markup=stop_session_kb(lang))
+        return
 
     # ── Album (media group) ──
     if message.media_group_id:
@@ -201,28 +293,7 @@ async def handle_anonymous_message(message: Message, state: FSMContext):
         return
 
     # ── Single message ──
-    text_content, content_type, file_id = _extract_content(message)
-    msg = await create_message(
-        link_id=link.id,
-        sender_id=message.from_user.id,
-        text=text_content,
-        content_type=content_type,
-        file_id=file_id,
-        sender_username=message.from_user.username,
-        sender_full_name=message.from_user.full_name,
-    )
-
-    plan = {
-        "kind": "text" if content_type == "text" else "media",
-        "msg_id": msg.id,
-        "text": text_content,
-        "file_id": file_id,
-        "owner_id": owner.telegram_id,
-        "owner_lang": owner.language or "ru",
-        "whois": user_can_see_whois(owner),
-        "sender_id": message.from_user.id,
-        "sender_lang": lang,
-    }
+    msg, plan = await _build_plan(message, link, owner, lang)
     try:
         await _deliver_and_confirm(plan, message, message)
     except Exception as e:

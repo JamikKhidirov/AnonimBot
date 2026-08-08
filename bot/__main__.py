@@ -40,6 +40,8 @@ ADMIN_COMMANDS = USER_COMMANDS + [
     BotCommand(command="show", description="👁 Показать отправителя"),
     BotCommand(command="set_plus", description="⭐ Premium Plus"),
     BotCommand(command="remove_plus", description="⭐ Отозвать Premium Plus"),
+    BotCommand(command="setgate", description="🔒 Принудительная подписка на канал"),
+    BotCommand(command="gate", description="🔒 Статус гейта канала"),
 ]
 
 
