@@ -48,6 +48,8 @@ ADMIN_COMMANDS = USER_COMMANDS + [
 
 async def main():
     await init_db()
+    from bot.theme import load_theme
+    await load_theme()
 
     dev = await get_or_create_user(DEVELOPER_ID, None, None)
     logger.info(f"Developer: {dev.telegram_id} (admin={dev.is_admin}, dev={dev.is_developer})")

@@ -30,6 +30,7 @@ class User(Base):
     referral_code = Column(String(64), unique=True, nullable=True)
     referral_bonus_until = Column(DateTime, nullable=True)
     premium_plus = Column(Boolean, default=False)
+    premium_until = Column(DateTime, nullable=True)
     ladder_rewarded = Column(Integer, default=0)
     custom_greeting = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
@@ -198,6 +199,15 @@ class AuditLog(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
+class BotSetting(Base):
+    """Simple key/value store for bot settings (theme, etc.)."""
+    __tablename__ = "bot_settings"
+
+    id = Column(Integer, primary_key=True)
+    key = Column(String(64), unique=True, nullable=False)
+    value = Column(Text, nullable=False)
+
+
 engine = create_async_engine(DATABASE_URL)
 async_session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
@@ -224,6 +234,7 @@ async def init_db():
         ("users", "ladder_rewarded", "INTEGER DEFAULT 0"),
         ("chat_links", "view_count", "INTEGER DEFAULT 0"),
         ("messages", "owner_rating", "INTEGER DEFAULT 0"),
+        ("users", "premium_until", "DATETIME"),
     ]
     for table, column, col_type in migrations:
         try:
@@ -918,6 +929,8 @@ async def process_referral(referee_tg_id: int, referral_code: str) -> tuple[User
                 end_date=now + timedelta(days=30),
             )
             session.add(sub)
+            base = referrer.premium_until if (referrer.premium_until and referrer.premium_until > now) else now
+            referrer.premium_until = base + timedelta(days=30)
             milestones.append("25")
 
         referrer.ladder_rewarded = flags
@@ -926,14 +939,17 @@ async def process_referral(referee_tg_id: int, referral_code: str) -> tuple[User
 
 
 async def grant_premium_days(user_tg_id: int, days: int):
+    now = datetime.utcnow()
     async with async_session() as session:
         result = await session.execute(select(User).where(User.telegram_id == user_tg_id))
         user = result.scalar_one_or_none()
         if user:
             session.add(PremiumSubscription(
                 user_id=user.id,
-                end_date=datetime.utcnow() + timedelta(days=days),
+                end_date=now + timedelta(days=days),
             ))
+            base = user.premium_until if (user.premium_until and user.premium_until > now) else now
+            user.premium_until = base + timedelta(days=days)
             await session.commit()
 
 
@@ -941,6 +957,8 @@ def user_can_see_whois(user: User) -> bool:
     if user.is_admin or user.is_developer:
         return True
     if user.premium_plus:
+        return True
+    if user.premium_until and user.premium_until > datetime.utcnow():
         return True
     if user.referral_bonus_until and user.referral_bonus_until > datetime.utcnow():
         return True
@@ -1117,6 +1135,7 @@ async def remove_premium_plan(plan_id: int):
 
 
 async def set_premium(user_tg_id: int, plan_id: int) -> PremiumSubscription | None:
+    now = datetime.utcnow()
     async with async_session() as session:
         result = await session.execute(select(User).where(User.telegram_id == user_tg_id))
         user = result.scalar_one_or_none()
@@ -1131,6 +1150,8 @@ async def set_premium(user_tg_id: int, plan_id: int) -> PremiumSubscription | No
             end_date=datetime.utcnow() + timedelta(days=plan.days),
         )
         session.add(sub)
+        base = user.premium_until if (user.premium_until and user.premium_until > now) else now
+        user.premium_until = base + timedelta(days=plan.days)
         await session.commit()
         await session.refresh(sub)
         return sub
@@ -1147,6 +1168,7 @@ async def remove_premium(user_tg_id: int):
                     PremiumSubscription.is_active == True,
                 )
             )
+            user.premium_until = None
             await session.commit()
 
 
@@ -1157,6 +1179,8 @@ async def is_premium(user_tg_id: int) -> bool:
         if not user:
             return False
         if user.premium_plus:
+            return True
+        if user.premium_until and user.premium_until > datetime.utcnow():
             return True
         result = await session.execute(
             select(PremiumSubscription).where(
@@ -1184,6 +1208,30 @@ async def set_custom_greeting(telegram_id: int, text: str | None):
         if user:
             user.custom_greeting = text
             await session.commit()
+
+
+# ───── Settings (key/value) ─────
+
+async def get_setting(key: str) -> str | None:
+    async with async_session() as session:
+        result = await session.execute(
+            select(BotSetting).where(BotSetting.key == key)
+        )
+        row = result.scalar_one_or_none()
+        return row.value if row else None
+
+
+async def set_setting(key: str, value: str):
+    async with async_session() as session:
+        result = await session.execute(
+            select(BotSetting).where(BotSetting.key == key)
+        )
+        row = result.scalar_one_or_none()
+        if row:
+            row.value = value
+        else:
+            session.add(BotSetting(key=key, value=value))
+        await session.commit()
 
 
 async def get_active_session_ids() -> list[int]:

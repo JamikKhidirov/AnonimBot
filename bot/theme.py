@@ -1,19 +1,64 @@
 """Visual theme for the bot.
 
 Telegram does not support arbitrary text colors inside messages, so the theme
-is used as the bot's "signature": an accent emoji + bolded headers + a color
-stripe rendered via the mention-style link (it picks up the reader's app
-accent color). The developer can change THEME_ACCENT / THEME_COLOR in .env.
+is the bot's "signature": an accent emoji + bolded headers (a color stripe is
+rendered via the mention-style link, picking up the reader's app accent).
+
+The developer can change THEME_ACCENT / THEME_COLOR in .env (defaults) or
+live from the /admin panel — changes are stored in the DB via bot_settings
+and applied instantly.
 """
 
 import os
 
-ACCENT_EMOJI = (os.getenv("THEME_ACCENT") or "🔶").strip()
-# Kept for reference/reporting; Telegram ignores raw hex colors, but some
-# front-ends (e.g. export/HTML reports) can use the accent value.
-ACCENT_COLOR = (os.getenv("THEME_COLOR") or "#F59E0B").strip().upper()
+from bot.database import get_setting, set_setting
+
+_ACCENT_EMOJI = (os.getenv("THEME_ACCENT") or "🔶").strip()
+# Kept for reference/reporting; Telegram ignores raw hex colors.
+_ACCENT_COLOR = (os.getenv("THEME_COLOR") or "#F59E0B").strip().upper()
 
 _DUMMY_LINK_ID = 5000000000
+
+
+def _emoji() -> str:
+    return _ACCENT_EMOJI
+
+
+def _color() -> str:
+    return _ACCENT_COLOR
+
+
+def current() -> tuple[str, str]:
+    return _emoji(), _color()
+
+
+async def load_theme():
+    """Loads theme overrides from the DB (called once at startup)."""
+    global _ACCENT_EMOJI, _ACCENT_COLOR
+    e = await get_setting("theme.emoji")
+    if e:
+        _ACCENT_EMOJI = e
+    c = await get_setting("theme.color")
+    if c:
+        _ACCENT_COLOR = c.upper()
+
+
+async def set_theme(emoji: str | None = None, color: str | None = None):
+    global _ACCENT_EMOJI, _ACCENT_COLOR
+    if emoji:
+        _ACCENT_EMOJI = emoji
+        await set_setting("theme.emoji", emoji)
+    if color:
+        _ACCENT_COLOR = color.upper()
+        await set_setting("theme.color", color.upper())
+
+
+async def reset_theme():
+    global _ACCENT_EMOJI, _ACCENT_COLOR
+    _ACCENT_EMOJI = (os.getenv("THEME_ACCENT") or "🔶").strip()
+    _ACCENT_COLOR = (os.getenv("THEME_COLOR") or "#F59E0B").strip().upper()
+    await set_setting("theme.emoji", _ACCENT_EMOJI)
+    await set_setting("theme.color", _ACCENT_COLOR)
 
 
 def accent(text: str) -> str:
@@ -23,7 +68,7 @@ def accent(text: str) -> str:
 
 def head(title: str) -> str:
     """Themed header line used at the top of bot messages."""
-    return f"{ACCENT_EMOJI} <b>{title}</b>"
+    return f"{_emoji()} <b>{title}</b>"
 
 
 def card(title: str, body: str) -> str:

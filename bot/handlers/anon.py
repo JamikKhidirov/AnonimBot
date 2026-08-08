@@ -92,7 +92,7 @@ async def _deliver_to_owner(plan: dict) -> list[tuple[int, int]]:
     kb = _delivery_kb(plan["msg_id"], owner_lang, bool(plan.get("whois")))
 
     if kind == "text":
-        body = head(t("new_anon_title", owner_lang)) + "\n\n" + plan["text"]
+        body = head(t("new_anon_title", owner_lang)) + "\n\n" + t("new_anon_body", owner_lang).format(text=plan["text"])
         sent = await bot.send_message(owner_tg_id, body, reply_markup=kb)
         return [(sent.message_id, owner_tg_id)]
 

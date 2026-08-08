@@ -31,6 +31,7 @@ from bot.database import (
     get_channel_gate, set_channel_gate,
 )
 from bot.locales import t, role_label
+from bot.theme import head, current, set_theme, reset_theme
 from bot.keyboards import (
     admin_menu_kb, back_kb,
     msgs_page_kb, msg_info_kb, sender_msgs_page_kb,
@@ -55,6 +56,14 @@ class AdEditStates(StatesGroup):
 
 class AdIntervalStates(StatesGroup):
     waiting = State()
+
+
+class AdminThemeStates(StatesGroup):
+    color = State()
+
+
+class AdminGateStates(StatesGroup):
+    channel = State()
 
 
 def is_dev(tg_id: int) -> bool:
@@ -90,7 +99,7 @@ async def admin_command(message: Message):
 # ─────────────────────── admin callbacks ───────────────────────
 
 @dp.callback_query(F.data.startswith("admin_"))
-async def admin_callback(cb: CallbackQuery):
+async def admin_callback(cb: CallbackQuery, state: FSMContext):
     try:
         if not is_dev(cb.from_user.id):
             await cb.answer("🔥 <b>Команда /admin доступна только разработчику.</b>", show_alert=True)
@@ -297,10 +306,142 @@ async def admin_callback(cb: CallbackQuery):
                 await cb.message.edit_text(t("dev_only", lang), reply_markup=back_kb())
                 return
             kb = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="📋 Все команды", callback_data="admin_commands")],
+                [InlineKeyboardButton(text="🎨 Тема", callback_data="admin_theme"),
+                 InlineKeyboardButton(text="🔒 Гейт канала", callback_data="admin_gate")],
                 [InlineKeyboardButton(text="🕵 Журнал действий", callback_data="admin_audit")],
                 [InlineKeyboardButton(text="◀ Назад", callback_data="admin_panel")],
             ])
-            await cb.message.edit_text(t("dev_panel", lang), reply_markup=kb)
+            await cb.message.edit_text(
+                "⚙️ <b>Для разработчика</b>\n\n"
+                "Выбери раздел: все команды, оформление или гейт канала.",
+                reply_markup=kb,
+            )
+            return
+
+        if data == "admin_commands":
+            if not is_dev(cb.from_user.id):
+                await cb.message.edit_text(t("dev_only", lang), reply_markup=back_kb())
+                return
+            text = (
+                "📋 <b>Все команды</b>\n\n"
+                "<b>Общие:</b>\n"
+                "• /start — главная\n"
+                "• /messages — мои сообщения\n"
+                "• /stats — статистика ссылки\n"
+                "• /top — топ-анонимы по оценкам\n"
+                "• /setgreeting — приветствие для анонимов\n"
+                "• /resetlink — сбросить ссылку\n"
+                "• /help · /language · /stop\n\n"
+                "<b>Разработчик / админ-панель:</b>\n"
+                "• /admin — открыть панель\n"
+                "• /view_user — инфо о пользователе\n"
+                "• /view_messages — сообщения юзера\n"
+                "• /sender — отправитель по ID\n"
+                "• /search_user · /search_messages — поиск\n"
+                "• /show — показать отправителя\n\n"
+                "<b>Только разработчик:</b>\n"
+                "• /set_plus /remove_plus — Premium Plus\n"
+                "• /setgate @канал / /gate — гейт подписки\n"
+                "• /add_admin /remove_admin — админы\n"
+                "• /ban /unban /banlist — баны\n"
+                "• /broadcast — рассылка\n"
+                "• /cleanup [дни] — очистка\n"
+                "• /export_csv — экспорт\n\n"
+                "🎨 Тему и канал гейта можно менять прямо здесь → кнопки ниже."
+            )
+            await cb.message.edit_text(text, reply_markup=back_kb("admin_dev"))
+            return
+
+        if data == "admin_theme":
+            if not is_dev(cb.from_user.id):
+                await cb.message.edit_text(t("dev_only", lang), reply_markup=back_kb())
+                return
+            emoji, color = current()
+            sample = f"{head('Пример сообщения')}\n\n✨ Теперь все заголовки бота выглядят так."
+            kb = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text=e, callback_data=f"theme_emoji:{e}")
+                 for e in ("🔶", "🔥", "💚", "🔷", "🟣", "❤️")],
+                [InlineKeyboardButton(text="🎨 Свой цвет (HEX)", callback_data="admin_theme_color")],
+                [InlineKeyboardButton(text="🔁 Сбросить к .env", callback_data="theme_reset")],
+                [InlineKeyboardButton(text="◀ Назад", callback_data="admin_dev")],
+            ])
+            await cb.message.edit_text(
+                f"🎨 <b>Тема бота</b>\n\n"
+                f"Акцент: <b>{emoji}</b>\n"
+                f"Цвет: <code>{color}</code>\n\n"
+                f"<i>Телеграм не умеет произвольный цвет текста, поэтому акцент "
+                f"— эмодзи + заголовки во всех сообщениях.</i>\n\n"
+                f"{sample}",
+                reply_markup=kb,
+            )
+            return
+
+        if data == "admin_gate":
+            if not is_dev(cb.from_user.id):
+                await cb.message.edit_text(t("dev_only", lang), reply_markup=back_kb())
+                return
+            gate = await get_channel_gate()
+            status = f"🔒 <b>t.me/{gate.channel}</b>" if gate else "🔓 <b>Отключён</b>"
+            kb = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="✏️ Задать канал", callback_data="admin_gate_set")],
+                [InlineKeyboardButton(text="🔓 Отключить", callback_data="admin_gate_off")],
+                [InlineKeyboardButton(text="◀ Назад", callback_data="admin_dev")],
+            ])
+            await cb.message.edit_text(
+                "🔒 <b>Гейт канала</b>\n\n"
+                "Пока включён — анонимы обязаны подписаться на канал, прежде чем писать.\n\n"
+                f"Текущий: {status}\n\n"
+                "⚠️ Бот должен быть добавлен в канал участником.",
+                reply_markup=kb,
+            )
+            return
+
+        if data == "admin_theme_color":
+            if not is_dev(cb.from_user.id):
+                return
+            await state.set_state(AdminThemeStates.color)
+            await cb.answer()
+            await cb.message.edit_text(
+                "<b>🎨 Цвет акцента</b>\n\n"
+                "Пришли HEX-код цвета (например <code>#FF6600</code> или <code>F59E0B</code>):\n\n"
+                "↩️ Нажми <b>/cancel</b> или отправь «-», чтобы отменить.",
+                reply_markup=back_kb("admin_theme"),
+            )
+            return
+
+        if data == "theme_reset":
+            if not is_dev(cb.from_user.id):
+                return
+            await reset_theme()
+            await cb.answer("🔁 Тема сброшена к .env.")
+            await cb.message.edit_text("🎨 Тема сброшена.", reply_markup=back_kb("admin_theme"))
+            return
+
+        if data == "admin_gate_set":
+            if not is_dev(cb.from_user.id):
+                return
+            await state.set_state(AdminGateStates.channel)
+            await cb.answer()
+            await cb.message.edit_text(
+                "🔒 <b>Гейт канала</b>\n\n"
+                "Пришли имя канала, например <code>@my_channel</code> или <code>t.me/my_channel</code>:\n\n"
+                "↩️ «От» или «-» — отменить.",
+                reply_markup=back_kb("admin_gate"),
+            )
+            return
+
+        if data == "admin_gate_off":
+            if not is_dev(cb.from_user.id):
+                return
+            await set_channel_gate(None)
+            await log_audit(cb.from_user.id, "gate_off", "")
+            await cb.answer("🔓 Гейт отключён.")
+            gate = await get_channel_gate()
+            await cb.message.edit_text(
+                "🔒 <b>Гейт канала</b>\n\nТекущий: 🔓 <b>Отключён</b>",
+                reply_markup=back_kb("admin_dev"),
+            )
             return
 
         if data == "admin_audit":
@@ -328,6 +469,87 @@ async def admin_callback(cb: CallbackQuery):
         except Exception:
             pass
         return
+
+
+# ──────────────────────── msg_info callback ────────────────────────
+
+@dp.callback_query(F.data.startswith("theme_emoji:"))
+async def theme_emoji_callback(cb: CallbackQuery):
+    try:
+        if not is_dev(cb.from_user.id):
+            await cb.answer(t("access_denied", await _user_lang(cb.from_user.id)), show_alert=True)
+            return
+        emoji = cb.data.split(":", 1)[1]
+        await set_theme(emoji=emoji)
+        await cb.answer(f"✅ Акцент: {emoji}")
+        await log_audit(cb.from_user.id, "theme_emoji", emoji)
+        e, c = current()
+        await cb.message.edit_text(
+            f"🎨 <b>Тема бота</b>\n\n"
+            f"Акцент: <b>{e}</b>\n"
+            f"Цвет: <code>{c}</code>\n\n"
+            f"{head('Пример сообщения')}\n✨ Теперь все заголовки бота выглядят так.",
+            reply_markup=back_kb("admin_dev"),
+        )
+    except Exception as err:
+        logger.exception(f"theme_emoji_callback error")
+
+
+@dp.message(AdminThemeStates.color)
+async def theme_color_received(message: Message, state: FSMContext):
+    if not is_dev(message.from_user.id):
+        await state.clear()
+        return
+    text = message.text.strip()
+    if text in ("-", "отмена", "cancel"):
+        await state.clear()
+        await message.answer("Отменено.", reply_markup=back_kb("admin_theme"))
+        return
+    color = text.upper().lstrip("#")
+    if len(color) != 6 or any(ch not in "0123456789ABCDEF" for ch in color):
+        await message.answer(
+            "⚠️ Это не HEX-код. Пример: <code>#FF6600</code> или <code>F59E0B</code>",
+            reply_markup=back_kb("admin_theme"),
+        )
+        return
+    await set_theme(color=f"#{color}")
+    await log_audit(message.from_user.id, "theme_color", f"#{color}")
+    await state.clear()
+    await message.answer(f"✅ Цвет акцента установлен: <code>#{color}</code>",
+                         reply_markup=back_kb("admin_theme"))
+
+
+@dp.message(AdminGateStates.channel)
+async def gate_channel_received(message: Message, state: FSMContext):
+    if not is_dev(message.from_user.id):
+        await state.clear()
+        return
+    text = message.text.strip()
+    if text in ("-", "от", "no"):
+        await state.clear()
+        await message.answer("Отменено.", reply_markup=back_kb("admin_gate"))
+        return
+    ch = text.lstrip("@").split("/")[-1].strip()
+    if not ch:
+        await message.answer("❌ Неверное имя канала.", reply_markup=back_kb("admin_gate"))
+        return
+    await set_channel_gate(ch)
+    await log_audit(message.from_user.id, "gate_on", f"channel={ch}")
+    await state.clear()
+    await message.answer(
+        f"🔒 Гейт включён: <b>t.me/{ch}</b>\n\n"
+        "⚠️ Проверь, что бот добавлен в канал участником.",
+        reply_markup=back_kb("admin_dev"),
+    )
+
+
+@dp.message(Command("cancel"))
+async def cancel_state_command(message: Message, state: FSMContext):
+    if await state.get_state():
+        await state.clear()
+        await message.answer("Отменено.")
+    else:
+        await message.answer("Нечего отменять.")
 
 
 # ──────────────────────── msg_info callback ────────────────────────
