@@ -1,7 +1,6 @@
 import logging
 import html
 import asyncio
-import json
 
 from aiogram import F
 from aiogram.fsm.context import FSMContext
@@ -16,16 +15,13 @@ from bot.database import (
     create_message, is_banned, get_or_create_user,
     get_or_create_link, reset_link, set_user_language,
     user_can_see_whois,
-    create_pending_delivery, get_pending_delivery,
-    delete_pending_delivery, delete_message_row,
+    delete_message_row,
+    get_forwarded_for_message, delete_forwarded_for_message,
 )
 from bot.locales import t
 from bot.keyboards import stop_session_kb
 
 logger = logging.getLogger(__name__)
-
-# How many seconds the sender can cancel (undo) their message.
-UNDO_SECONDS = 8
 
 # Buffers for incoming photo albums: key = (sender_tg_id, media_group_id)
 _album_buffers: dict[tuple, dict] = {}
@@ -54,16 +50,16 @@ def _extract_content(message: Message) -> tuple:
     return text, ct, fid
 
 
-def _pending_kb(lang: str, msg_id: int) -> InlineKeyboardMarkup:
+def _unsend_kb(lang: str, msg_id: int) -> InlineKeyboardMarkup:
     stop = stop_session_kb(lang).inline_keyboard[0]
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🗑 Отменить отправку", callback_data=f"cancel_send:{msg_id}")],
+        [InlineKeyboardButton(text="🗑 Удалить у владельца", callback_data=f"unsend:{msg_id}")],
         stop,
     ])
 
 
 async def _deliver_to_owner(plan: dict) -> list[tuple[int, int]]:
-    """Sends queued anonymous content to the owner. Returns (bot_message_id, owner_tg_id) pairs."""
+    """Sends anonymous content to the owner. Returns (bot_message_id, owner_tg_id) pairs."""
     owner_tg_id = plan["owner_id"]
     owner_lang = plan["owner_lang"]
     kind = plan["kind"]
@@ -99,27 +95,20 @@ async def _deliver_to_owner(plan: dict) -> list[tuple[int, int]]:
     return result
 
 
-async def _schedule_delivery(plan: dict, message_ref: Message | None):
-    """Waits UNDO_SECONDS, then delivers to owner unless the sender cancelled."""
+async def _deliver_and_confirm(plan: dict, message_ref: Message | None, reply_to: Message | None = None):
+    """Delivers to the owner immediately and shows the sender a 'delete' button."""
     if message_ref is not None:
         plan["message_ref"] = message_ref
-    await asyncio.sleep(UNDO_SECONDS)
-    pending = await get_pending_delivery(plan["msg_id"])
-    if not pending:
-        logger.info(f"ANON delivery cancelled before send: msg={plan['msg_id']}")
-        return
-    try:
-        delivered = await _deliver_to_owner(plan)
-        for bot_message_id, owner_tg_id in delivered:
-            await save_forwarded_message(bot_message_id, owner_tg_id, plan["msg_id"])
-        await delete_pending_delivery(plan["msg_id"])
-        logger.info(
-            f"ANON delivered ({plan['kind']}): sender={plan.get('sender_id')} "
-            f"-> owner={plan['owner_id']}: {(plan.get('text') or '')[:100]}"
-        )
-    except Exception as e:
-        logger.exception(f"ANON delivery failed msg={plan['msg_id']}: {type(e).__name__}: {e}")
-        await delete_pending_delivery(plan["msg_id"])
+    delivered = await _deliver_to_owner(plan)
+    for bot_message_id, owner_tg_id in delivered:
+        await save_forwarded_message(bot_message_id, owner_tg_id, plan["msg_id"])
+    lang = plan.get("sender_lang") or "ru"
+    if reply_to is not None:
+        await reply_to.answer(t("msg_sent", lang), reply_markup=_unsend_kb(lang, plan["msg_id"]))
+    logger.info(
+        f"ANON delivered ({plan['kind']}): sender={plan.get('sender_id')} "
+        f"-> owner={plan['owner_id']}: {(plan.get('text') or '')[:100]}"
+    )
 
 
 async def _finalize_album(
@@ -131,7 +120,7 @@ async def _finalize_album(
     username,
     full_name,
 ):
-    """Waits for the album to finish, then queues it with the undo window."""
+    """Waits for the album to finish, then delivers it to the owner immediately."""
     await asyncio.sleep(1.3)
     buf = _album_buffers.pop(key, None)
     if not buf or not buf["photos"]:
@@ -154,14 +143,12 @@ async def _finalize_album(
         "owner_lang": owner.language or "ru",
         "whois": user_can_see_whois(owner),
         "sender_id": sender_id,
+        "sender_lang": sender_user.language or "ru",
     }
-    await create_pending_delivery(msg.id, json.dumps({"kind": "album", "files": len(files)}))
-    lang = sender_user.language or "ru"
     try:
-        await buf["ref"].answer(t("msg_sent", lang), reply_markup=_pending_kb(lang, msg.id))
-    except Exception:
-        pass
-    asyncio.create_task(_schedule_delivery(plan, None))
+        await _deliver_and_confirm(plan, None, buf["ref"])
+    except Exception as e:
+        logger.exception(f"ANON album delivery failed msg={msg.id}: {type(e).__name__}: {e}")
 
 
 @dp.message(~F.reply_to_message)
@@ -234,30 +221,43 @@ async def handle_anonymous_message(message: Message, state: FSMContext):
         "owner_lang": owner.language or "ru",
         "whois": user_can_see_whois(owner),
         "sender_id": message.from_user.id,
+        "sender_lang": lang,
     }
-    await create_pending_delivery(msg.id, json.dumps({"kind": plan["kind"], "content_type": content_type}))
-    await message.answer(t("msg_sent", lang), reply_markup=_pending_kb(lang, msg.id))
-    asyncio.create_task(_schedule_delivery(plan, message))
+    try:
+        await _deliver_and_confirm(plan, message, message)
+    except Exception as e:
+        logger.exception(f"ANON delivery failed msg={msg.id}: {type(e).__name__}: {e}")
+        try:
+            await message.answer("❌ Не удалось доставить сообщение.")
+        except Exception:
+            pass
 
 
-@dp.callback_query(F.data.startswith("cancel_send:"))
-async def cancel_send_callback(cb):
+@dp.callback_query(F.data.startswith("unsend:"))
+async def unsend_callback(cb):
     try:
         await cb.answer()
         msg_id = int(cb.data.split(":")[1])
         msg = await get_message_by_id(msg_id)
         if not msg or msg.sender_id != cb.from_user.id:
-            await cb.answer("❌ Сообщение не найдено", show_alert=True)
+            await cb.answer("❌ Сообщение не найдено или уже удалено", show_alert=True)
             return
-        await delete_pending_delivery(msg_id)
+
+        forwards = await get_forwarded_for_message(msg_id)
+        for fw in forwards:
+            try:
+                await bot.delete_message(fw.owner_tg_id, fw.bot_message_id)
+            except Exception:
+                pass
+        await delete_forwarded_for_message(msg_id)
         await delete_message_row(msg_id)
-        logger.info(f"ANON undone by sender: msg={msg_id}")
+        logger.info(f"ANON unsent by sender: msg={msg_id}, copies deleted={len(forwards)}")
         try:
-            await cb.message.edit_text("🗑️ <b>Сообщение удалено.</b>\nОно не будет отправлено владельцу.")
+            await cb.message.edit_text("🗑️ <b>Сообщение удалено у владельца.</b>")
         except Exception:
             pass
     except Exception as e:
-        logger.exception(f"cancel_send_callback error")
+        logger.exception(f"unsend_callback error")
         try:
             await cb.message.edit_text(f"❌ Ошибка: {e}")
         except Exception:

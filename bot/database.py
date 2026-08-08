@@ -533,6 +533,22 @@ async def get_last_forwarded_for_user(owner_tg_id: int, original_msg_id: int) ->
         return result.scalar_one_or_none()
 
 
+async def get_forwarded_for_message(original_msg_id: int) -> list[ForwardedMessage]:
+    async with async_session() as session:
+        result = await session.execute(
+            select(ForwardedMessage).where(ForwardedMessage.original_msg_id == original_msg_id)
+        )
+        return list(result.scalars().all())
+
+
+async def delete_forwarded_for_message(original_msg_id: int):
+    async with async_session() as session:
+        await session.execute(
+            delete(ForwardedMessage).where(ForwardedMessage.original_msg_id == original_msg_id)
+        )
+        await session.commit()
+
+
 # ───── Undo send (pending deliveries) ─────
 
 async def create_pending_delivery(message_id: int, payload: str | None = None):
