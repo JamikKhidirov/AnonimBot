@@ -1,9 +1,11 @@
 import logging
 import html
+import asyncio
+import json
 
 from aiogram import F
 from aiogram.fsm.context import FSMContext
-from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, InputMediaPhoto
 
 from bot import bot, dp, get_bot_username
 from bot.database import (
@@ -14,11 +16,19 @@ from bot.database import (
     create_message, is_banned, get_or_create_user,
     get_or_create_link, reset_link, set_user_language,
     user_can_see_whois,
+    create_pending_delivery, get_pending_delivery,
+    delete_pending_delivery, delete_message_row,
 )
 from bot.locales import t
 from bot.keyboards import stop_session_kb
 
 logger = logging.getLogger(__name__)
+
+# How many seconds the sender can cancel (undo) their message.
+UNDO_SECONDS = 8
+
+# Buffers for incoming photo albums: key = (sender_tg_id, media_group_id)
+_album_buffers: dict[tuple, dict] = {}
 
 
 def _extract_content(message: Message) -> tuple:
@@ -42,6 +52,116 @@ def _extract_content(message: Message) -> tuple:
     elif message.video_note:
         fid = message.video_note.file_id
     return text, ct, fid
+
+
+def _pending_kb(lang: str, msg_id: int) -> InlineKeyboardMarkup:
+    stop = stop_session_kb(lang).inline_keyboard[0]
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🗑 Отменить отправку", callback_data=f"cancel_send:{msg_id}")],
+        stop,
+    ])
+
+
+async def _deliver_to_owner(plan: dict) -> list[tuple[int, int]]:
+    """Sends queued anonymous content to the owner. Returns (bot_message_id, owner_tg_id) pairs."""
+    owner_tg_id = plan["owner_id"]
+    owner_lang = plan["owner_lang"]
+    kind = plan["kind"]
+
+    whois_kb = None
+    if plan.get("whois"):
+        whois_kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text=t("whois_btn", owner_lang), callback_data=f"whois:{plan['msg_id']}")],
+        ])
+
+    if kind == "text":
+        body = t("new_anon", owner_lang).format(text=plan["text"])
+        sent = await bot.send_message(owner_tg_id, body, reply_markup=whois_kb)
+        return [(sent.message_id, owner_tg_id)]
+
+    if kind == "album":
+        media_group = [
+            InputMediaPhoto(media=f, caption=(plan.get("text") or "" if i == 0 else None))
+            for i, f in enumerate(plan["files"])
+        ]
+        sent_list = await bot.send_media_group(owner_tg_id, media_group)
+        result = [(s.message_id, owner_tg_id) for s in sent_list]
+        note = t("new_anon_media", owner_lang).format(text=plan.get("text") or "")
+        sent = await bot.send_message(owner_tg_id, note, reply_markup=whois_kb)
+        result.append((sent.message_id, owner_tg_id))
+        return result
+
+    media_copy = await plan["message_ref"].copy_to(owner_tg_id)
+    result = [(media_copy.message_id, owner_tg_id)]
+    note = t("new_anon_media", owner_lang).format(text=plan.get("text") or "")
+    sent = await bot.send_message(owner_tg_id, note, reply_markup=whois_kb)
+    result.append((sent.message_id, owner_tg_id))
+    return result
+
+
+async def _schedule_delivery(plan: dict, message_ref: Message | None):
+    """Waits UNDO_SECONDS, then delivers to owner unless the sender cancelled."""
+    if message_ref is not None:
+        plan["message_ref"] = message_ref
+    await asyncio.sleep(UNDO_SECONDS)
+    pending = await get_pending_delivery(plan["msg_id"])
+    if not pending:
+        logger.info(f"ANON delivery cancelled before send: msg={plan['msg_id']}")
+        return
+    try:
+        delivered = await _deliver_to_owner(plan)
+        for bot_message_id, owner_tg_id in delivered:
+            await save_forwarded_message(bot_message_id, owner_tg_id, plan["msg_id"])
+        await delete_pending_delivery(plan["msg_id"])
+        logger.info(
+            f"ANON delivered ({plan['kind']}): sender={plan.get('sender_id')} "
+            f"-> owner={plan['owner_id']}: {(plan.get('text') or '')[:100]}"
+        )
+    except Exception as e:
+        logger.exception(f"ANON delivery failed msg={plan['msg_id']}: {type(e).__name__}: {e}")
+        await delete_pending_delivery(plan["msg_id"])
+
+
+async def _finalize_album(
+    key: tuple,
+    sender_id: int,
+    link,
+    owner,
+    sender_user,
+    username,
+    full_name,
+):
+    """Waits for the album to finish, then queues it with the undo window."""
+    await asyncio.sleep(1.3)
+    buf = _album_buffers.pop(key, None)
+    if not buf or not buf["photos"]:
+        return
+
+    files = buf["photos"]
+    caption = buf["caption"] or ""
+    msg = await create_message(
+        link_id=link.id, sender_id=sender_id,
+        text=caption, content_type="album", file_id=files[0],
+        sender_username=username, sender_full_name=full_name,
+    )
+
+    plan = {
+        "kind": "album",
+        "msg_id": msg.id,
+        "text": caption,
+        "files": files,
+        "owner_id": owner.telegram_id,
+        "owner_lang": owner.language or "ru",
+        "whois": user_can_see_whois(owner),
+        "sender_id": sender_id,
+    }
+    await create_pending_delivery(msg.id, json.dumps({"kind": "album", "files": len(files)}))
+    lang = sender_user.language or "ru"
+    try:
+        await buf["ref"].answer(t("msg_sent", lang), reply_markup=_pending_kb(lang, msg.id))
+    except Exception:
+        pass
+    asyncio.create_task(_schedule_delivery(plan, None))
 
 
 @dp.message(~F.reply_to_message)
@@ -70,6 +190,30 @@ async def handle_anonymous_message(message: Message, state: FSMContext):
         await message.answer(t("session_expired", user.language or "ru"))
         return
 
+    owner = link.user
+    sender_user = await get_or_create_user(
+        message.from_user.id, message.from_user.username, message.from_user.full_name
+    )
+    lang = sender_user.language or "ru"
+
+    # ── Album (media group) ──
+    if message.media_group_id:
+        key = (message.from_user.id, message.media_group_id)
+        buf = _album_buffers.get(key)
+        if buf is None:
+            buf = _album_buffers[key] = {"photos": [], "caption": "", "task": None, "ref": message}
+        if message.photo:
+            buf["photos"].append(message.photo[-1].file_id)
+        if message.caption:
+            buf["caption"] = message.caption
+        if buf["task"] is None:
+            buf["task"] = asyncio.create_task(_finalize_album(
+                key, message.from_user.id, link, owner, sender_user,
+                message.from_user.username, message.from_user.full_name,
+            ))
+        return
+
+    # ── Single message ──
     text_content, content_type, file_id = _extract_content(message)
     msg = await create_message(
         link_id=link.id,
@@ -81,40 +225,43 @@ async def handle_anonymous_message(message: Message, state: FSMContext):
         sender_full_name=message.from_user.full_name,
     )
 
-    sender_user = await get_or_create_user(message.from_user.id, message.from_user.username, message.from_user.full_name)
-    await message.answer(t("msg_sent", sender_user.language or "ru"), reply_markup=stop_session_kb(sender_user.language or "ru"))
+    plan = {
+        "kind": "text" if content_type == "text" else "media",
+        "msg_id": msg.id,
+        "text": text_content,
+        "file_id": file_id,
+        "owner_id": owner.telegram_id,
+        "owner_lang": owner.language or "ru",
+        "whois": user_can_see_whois(owner),
+        "sender_id": message.from_user.id,
+    }
+    await create_pending_delivery(msg.id, json.dumps({"kind": plan["kind"], "content_type": content_type}))
+    await message.answer(t("msg_sent", lang), reply_markup=_pending_kb(lang, msg.id))
+    asyncio.create_task(_schedule_delivery(plan, message))
 
-    owner = link.user
-    owner_lang = owner.language or "ru"
 
-    if content_type == "text":
-        owner_text = t("new_anon", owner_lang).format(text=text_content)
-        if user_can_see_whois(owner):
-            whois_kb = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text=t("whois_btn", owner_lang), callback_data=f"whois:{msg.id}")],
-            ])
-            sent = await bot.send_message(owner.telegram_id, owner_text, reply_markup=whois_kb)
-        else:
-            sent = await bot.send_message(owner.telegram_id, owner_text)
-        await save_forwarded_message(sent.message_id, owner.telegram_id, msg.id)
-    else:
-        media_copy = await message.copy_to(owner.telegram_id)
-        await save_forwarded_message(media_copy.message_id, owner.telegram_id, msg.id)
-        note = t("new_anon_media", owner_lang).format(text=text_content)
-        if user_can_see_whois(owner):
-            whois_kb = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text=t("whois_btn", owner_lang), callback_data=f"whois:{msg.id}")],
-            ])
-            sent = await bot.send_message(owner.telegram_id, note, reply_markup=whois_kb)
-        else:
-            sent = await bot.send_message(owner.telegram_id, note)
-        await save_forwarded_message(sent.message_id, owner.telegram_id, msg.id)
-
-    logger.info(
-        f"ANON ({content_type}): sender={message.from_user.id} "
-        f"(@{message.from_user.username}) -> owner={owner.telegram_id} "
-        f"(@{owner.username}): {text_content[:100]}"
-    )
+@dp.callback_query(F.data.startswith("cancel_send:"))
+async def cancel_send_callback(cb):
+    try:
+        await cb.answer()
+        msg_id = int(cb.data.split(":")[1])
+        msg = await get_message_by_id(msg_id)
+        if not msg or msg.sender_id != cb.from_user.id:
+            await cb.answer("❌ Сообщение не найдено", show_alert=True)
+            return
+        await delete_pending_delivery(msg_id)
+        await delete_message_row(msg_id)
+        logger.info(f"ANON undone by sender: msg={msg_id}")
+        try:
+            await cb.message.edit_text("🗑️ <b>Сообщение удалено.</b>\nОно не будет отправлено владельцу.")
+        except Exception:
+            pass
+    except Exception as e:
+        logger.exception(f"cancel_send_callback error")
+        try:
+            await cb.message.edit_text(f"❌ Ошибка: {e}")
+        except Exception:
+            pass
 
 
 @dp.message(F.reply_to_message)

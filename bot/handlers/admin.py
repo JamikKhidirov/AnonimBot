@@ -26,6 +26,7 @@ from bot.database import (
     delete_advert, set_advert_enabled, is_advert_enabled,
     get_premium_plans, add_premium_plan, remove_premium_plan,
     set_premium, remove_premium, is_premium,
+    set_premium_plus, log_audit, get_audit_log,
 )
 from bot.locales import t, role_label
 from bot.keyboards import (
@@ -293,7 +294,29 @@ async def admin_callback(cb: CallbackQuery):
             if not is_dev(cb.from_user.id):
                 await cb.message.edit_text(t("dev_only", lang), reply_markup=back_kb())
                 return
-            await cb.message.edit_text(t("dev_panel", lang), reply_markup=back_kb())
+            kb = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="🕵 Журнал действий", callback_data="admin_audit")],
+                [InlineKeyboardButton(text="◀ Назад", callback_data="admin_panel")],
+            ])
+            await cb.message.edit_text(t("dev_panel", lang), reply_markup=kb)
+            return
+
+        if data == "admin_audit":
+            if not is_dev(cb.from_user.id):
+                await cb.message.edit_text(t("dev_only", lang), reply_markup=back_kb())
+                return
+            records = await get_audit_log(20)
+            if not records:
+                text = "🕵 <b>Журнал действий</b>\n\nПока пусто."
+            else:
+                lines = ["🕵 <b>Журнал действий</b>\n"]
+                for r in records:
+                    who = r.admin_tg_id
+                    t_ = r.created_at.strftime("%d.%m %H:%M") if r.created_at else "-"
+                    lines.append(f"• <code>{who}</code> — {r.action}\n"
+                                 f"   {r.target_desc or ''} <i>({t_})</i>")
+                text = "\n".join(lines)
+            await cb.message.edit_text(text, reply_markup=back_kb("admin_dev"))
             return
 
     except Exception as e:
@@ -584,6 +607,7 @@ async def add_admin_command(message: Message):
         await message.answer(t("user_not_found", "ru").format(id=target_id))
         return
     await set_admin(target_id, True, message.from_user.id)
+    await log_audit(message.from_user.id, "add_admin", f"admin={target_id}")
     await message.answer(t("add_admin_done", "ru").format(id=target_id))
     try:
         await bot.send_message(target_id, t("add_admin_notified", user.language or "ru"))
@@ -609,6 +633,7 @@ async def remove_admin_command(message: Message):
         await message.answer(t("remove_admin_not_found", "ru").format(id=target_id))
         return
     await set_admin(target_id, False)
+    await log_audit(message.from_user.id, "remove_admin", f"admin={target_id}")
     await message.answer(t("remove_admin_done", "ru").format(id=target_id))
 
 
@@ -831,6 +856,7 @@ async def ban_command(message: Message):
         await message.answer(t("ban_already", "ru").format(id=target_id))
         return
     await ban_user(target_id, message.from_user.id, reason)
+    await log_audit(message.from_user.id, "ban", f"user={target_id} reason={reason or '-'}")
     await message.answer(t("ban_done", "ru").format(id=target_id, reason=reason or "-"))
 
 
@@ -849,6 +875,7 @@ async def unban_command(message: Message):
         await message.answer(t("unban_not_found", "ru").format(id=target_id))
         return
     await unban_user(target_id)
+    await log_audit(message.from_user.id, "unban", f"user={target_id}")
     await message.answer(t("unban_done", "ru").format(id=target_id))
 
 
@@ -905,6 +932,37 @@ async def broadcast_command(message: Message):
         await asyncio.sleep(0.05)
 
     await message.answer(t("broadcast_done", "ru").format(sent=sent, errors=errors))
+    await log_audit(message.from_user.id, "broadcast", f"sent={sent} errors={errors} total={len(user_ids)}")
+
+
+@dp.message(Command("set_plus"))
+async def set_plus_command(message: Message):
+    if not is_dev(message.from_user.id):
+        await message.answer(t("access_denied", await _user_lang(message.from_user.id)))
+        return
+    args = message.text.split(maxsplit=1)
+    if len(args) < 2 or not args[1].strip().isdigit():
+        await message.answer("Использование: /set_plus <telegram_id>")
+        return
+    target_id = int(args[1].strip())
+    await set_premium_plus(target_id, True)
+    await log_audit(message.from_user.id, "set_plus", f"user={target_id}")
+    await message.answer(f"⭐ Premium Plus выдан пользователю <code>{target_id}</code>.\nБез рекламы + «Кто это?» навсегда.")
+
+
+@dp.message(Command("remove_plus"))
+async def remove_plus_command(message: Message):
+    if not is_dev(message.from_user.id):
+        await message.answer(t("access_denied", await _user_lang(message.from_user.id)))
+        return
+    args = message.text.split(maxsplit=1)
+    if len(args) < 2 or not args[1].strip().isdigit():
+        await message.answer("Использование: /remove_plus <telegram_id>")
+        return
+    target_id = int(args[1].strip())
+    await set_premium_plus(target_id, False)
+    await log_audit(message.from_user.id, "remove_plus", f"user={target_id}")
+    await message.answer(f"⭐ Premium Plus отозван у <code>{target_id}</code>.")
 
 
 @dp.message(Command("export_csv"))

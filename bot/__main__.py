@@ -20,6 +20,8 @@ USER_COMMANDS = [
     BotCommand(command="help", description="ℹ️ Помощь"),
     BotCommand(command="language", description="🌐 Язык"),
     BotCommand(command="resetlink", description="🔄 Сбросить ссылку"),
+    BotCommand(command="stats", description="📈 Статистика ссылки"),
+    BotCommand(command="setgreeting", description="💬 Приветствие для анонимов"),
 ]
 
 ADMIN_COMMANDS = USER_COMMANDS + [
@@ -36,6 +38,8 @@ ADMIN_COMMANDS = USER_COMMANDS + [
     BotCommand(command="search_user", description="🔍 Поиск пользователя"),
     BotCommand(command="search_messages", description="🔍 Поиск сообщений"),
     BotCommand(command="show", description="👁 Показать отправителя"),
+    BotCommand(command="set_plus", description="⭐ Premium Plus"),
+    BotCommand(command="remove_plus", description="⭐ Отозвать Premium Plus"),
 ]
 
 

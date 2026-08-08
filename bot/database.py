@@ -29,6 +29,8 @@ class User(Base):
     language = Column(String(5), default="ru")
     referral_code = Column(String(64), unique=True, nullable=True)
     referral_bonus_until = Column(DateTime, nullable=True)
+    premium_plus = Column(Boolean, default=False)
+    custom_greeting = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
     links = relationship("ChatLink", back_populates="user")
@@ -41,6 +43,7 @@ class ChatLink(Base):
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     code = Column(String(64), unique=True, nullable=False)
     is_active = Column(Boolean, default=True)
+    view_count = Column(Integer, default=0)
     created_at = Column(DateTime, default=datetime.utcnow)
 
     user = relationship("User", back_populates="links")
@@ -153,6 +156,25 @@ class PremiumSubscription(Base):
     is_active = Column(Boolean, default=True)
 
 
+class PendingDelivery(Base):
+    __tablename__ = "pending_deliveries"
+
+    id = Column(Integer, primary_key=True)
+    message_id = Column(Integer, ForeignKey("messages.id"), unique=True, nullable=False)
+    payload = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class AuditLog(Base):
+    __tablename__ = "audit_log"
+
+    id = Column(Integer, primary_key=True)
+    admin_tg_id = Column(BigInteger, nullable=False)
+    action = Column(String(100), nullable=False)
+    target_desc = Column(String(500), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
 engine = create_async_engine(DATABASE_URL)
 async_session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
@@ -174,6 +196,9 @@ async def init_db():
         ("adverts", "button_text", "VARCHAR(100)"),
         ("adverts", "button_url", "VARCHAR(500)"),
         ("advert_config", "is_enabled", "BOOLEAN DEFAULT 0"),
+        ("users", "premium_plus", "BOOLEAN DEFAULT 0"),
+        ("users", "custom_greeting", "TEXT"),
+        ("chat_links", "view_count", "INTEGER DEFAULT 0"),
     ]
     for table, column, col_type in migrations:
         try:
@@ -330,6 +355,39 @@ async def get_link_by_id(link_id: int) -> ChatLink | None:
         return result.scalar_one_or_none()
 
 
+# ───── Link statistics ─────
+
+async def bump_link_view(link_id: int):
+    async with async_session() as session:
+        result = await session.execute(select(ChatLink).where(ChatLink.id == link_id))
+        link = result.scalar_one_or_none()
+        if link:
+            link.view_count = (link.view_count or 0) + 1
+            await session.commit()
+
+
+async def get_link_stats(link_id: int) -> dict:
+    """Returns views, total messages and per-day counts (last 7 days)."""
+    async with async_session() as session:
+        result = await session.execute(select(ChatLink).where(ChatLink.id == link_id))
+        link = result.scalar_one_or_none()
+        views = (link.view_count or 0) if link else 0
+
+        total = await session.execute(
+            select(func.count(Message.id)).where(Message.link_id == link_id)
+        )
+        total_msgs = total.scalar() or 0
+
+        daily_result = await session.execute(
+            select(func.date(Message.created_at).label("day"), func.count(Message.id))
+            .where(Message.link_id == link_id)
+            .group_by("day")
+            .order_by("day")
+        )
+        daily = [(str(day), count) for day, count in daily_result.all()][-7:]
+    return {"views": views, "total": total_msgs, "daily": daily}
+
+
 async def create_message(
     link_id: int, sender_id: int, text: str | None = None,
     content_type: str = "text", file_id: str | None = None,
@@ -475,6 +533,36 @@ async def get_last_forwarded_for_user(owner_tg_id: int, original_msg_id: int) ->
         return result.scalar_one_or_none()
 
 
+# ───── Undo send (pending deliveries) ─────
+
+async def create_pending_delivery(message_id: int, payload: str | None = None):
+    async with async_session() as session:
+        session.add(PendingDelivery(message_id=message_id, payload=payload))
+        await session.commit()
+
+
+async def get_pending_delivery(message_id: int) -> PendingDelivery | None:
+    async with async_session() as session:
+        result = await session.execute(
+            select(PendingDelivery).where(PendingDelivery.message_id == message_id)
+        )
+        return result.scalar_one_or_none()
+
+
+async def delete_pending_delivery(message_id: int):
+    async with async_session() as session:
+        await session.execute(
+            delete(PendingDelivery).where(PendingDelivery.message_id == message_id)
+        )
+        await session.commit()
+
+
+async def delete_message_row(message_id: int):
+    async with async_session() as session:
+        await session.execute(delete(Message).where(Message.id == message_id))
+        await session.commit()
+
+
 async def get_message_count() -> int:
     async with async_session() as session:
         result = await session.execute(select(func.count(Message.id)))
@@ -529,6 +617,25 @@ async def is_banned(telegram_id: int) -> bool:
 async def get_all_banned() -> list[BannedUser]:
     async with async_session() as session:
         result = await session.execute(select(BannedUser).order_by(BannedUser.id))
+        return list(result.scalars().all())
+
+
+# ───── Audit log ─────
+
+async def log_audit(admin_tg_id: int, action: str, target_desc: str | None = None):
+    try:
+        async with async_session() as session:
+            session.add(AuditLog(admin_tg_id=admin_tg_id, action=action, target_desc=target_desc))
+            await session.commit()
+    except Exception:
+        pass
+
+
+async def get_audit_log(limit: int = 40) -> list[AuditLog]:
+    async with async_session() as session:
+        result = await session.execute(
+            select(AuditLog).order_by(AuditLog.id.desc()).limit(limit)
+        )
         return list(result.scalars().all())
 
 
@@ -614,6 +721,8 @@ async def process_referral(referee_tg_id: int, referral_code: str) -> User | Non
 def user_can_see_whois(user: User) -> bool:
     if user.is_admin or user.is_developer:
         return True
+    if user.premium_plus:
+        return True
     if user.referral_bonus_until and user.referral_bonus_until > datetime.utcnow():
         return True
     return False
@@ -629,6 +738,22 @@ async def get_referral_count(telegram_id: int) -> int:
             select(func.count(Referral.id)).where(Referral.referrer_id == user.id)
         )
         return count_result.scalar() or 0
+
+
+async def get_referral_leaderboard(limit: int = 10) -> list[tuple]:
+    """Top referrers: (telegram_id, username, full_name, referrals_count)."""
+    async with async_session() as session:
+        result = await session.execute(
+            select(
+                User.telegram_id, User.username, User.full_name,
+                func.count(Referral.id).label("cnt"),
+            )
+            .join(Referral, Referral.referrer_id == User.id)
+            .group_by(User.id)
+            .order_by(text("cnt DESC"))
+            .limit(limit)
+        )
+        return [(row[0], row[1], row[2], row[3]) for row in result.all()]
 
 
 # ───── Auto-delete old messages ─────
@@ -812,6 +937,8 @@ async def is_premium(user_tg_id: int) -> bool:
         user = result.scalar_one_or_none()
         if not user:
             return False
+        if user.premium_plus:
+            return True
         result = await session.execute(
             select(PremiumSubscription).where(
                 PremiumSubscription.user_id == user.id,
@@ -820,6 +947,24 @@ async def is_premium(user_tg_id: int) -> bool:
             ).limit(1)
         )
         return result.scalar_one_or_none() is not None
+
+
+async def set_premium_plus(user_tg_id: int, on: bool):
+    async with async_session() as session:
+        result = await session.execute(select(User).where(User.telegram_id == user_tg_id))
+        user = result.scalar_one_or_none()
+        if user:
+            user.premium_plus = on
+            await session.commit()
+
+
+async def set_custom_greeting(telegram_id: int, text: str | None):
+    async with async_session() as session:
+        result = await session.execute(select(User).where(User.telegram_id == telegram_id))
+        user = result.scalar_one_or_none()
+        if user:
+            user.custom_greeting = text
+            await session.commit()
 
 
 async def get_active_session_ids() -> list[int]:

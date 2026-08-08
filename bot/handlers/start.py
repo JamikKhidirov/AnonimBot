@@ -5,7 +5,8 @@ from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
 from bot import bot, dp, get_bot_username
 from bot.database import (
     get_or_create_user, get_or_create_link, get_link_by_code, set_active_session,
-    get_or_create_referral_code, process_referral, get_referral_count,
+    get_or_create_referral_code, process_referral, get_referral_count, bump_link_view,
+    get_referral_leaderboard,
 )
 from bot.locales import t
 from bot.keyboards import stop_session_kb
@@ -107,11 +108,16 @@ async def _handle_deep_link(message: Message, user, code: str, lang: str):
         )
         return
 
+    await bump_link_view(link.id)
     await set_active_session(message.from_user.id, code)
-    await message.answer(t("chat_started", lang), reply_markup=stop_session_kb(lang))
-    owner_lang = link.user.language or "ru"
+    owner = link.user
+    if owner.custom_greeting:
+        await message.answer(owner.custom_greeting, reply_markup=stop_session_kb(lang))
+    else:
+        await message.answer(t("chat_started", lang), reply_markup=stop_session_kb(lang))
+    owner_lang = owner.language or "ru"
     await bot.send_message(
-        link.user.telegram_id,
+        owner.telegram_id,
         t("new_visitor", owner_lang),
     )
 
@@ -136,6 +142,15 @@ async def bonuses_callback(cb):
         else:
             bonus_status = "❌ <b>Неактивен</b>"
 
+        top = await get_referral_leaderboard(5)
+        medals = ["🥇", "🥈", "🥉", "4️⃣", "5️⃣"]
+        lb_lines = []
+        for i, (tg, uname, fname, cnt) in enumerate(top):
+            label = uname or fname or str(tg)
+            lb_lines.append(f"{medals[i] if i < len(medals) else '▪️'} {label} — <b>{cnt}</b>")
+        if not lb_lines:
+            lb_lines.append("   пока никто никого не пригласил")
+
         text = (
             "🎁 <b>Твои бонусы</b>\n\n"
             f"👥 Приглашено друзей: <b>{ref_count}</b>\n"
@@ -144,7 +159,9 @@ async def bonuses_callback(cb):
             "📋 <b>Твоя реферальная ссылка:</b>\n"
             f"<code>{ref_url}</code>\n\n"
             "Скопируй и отправь другу!\n"
-            "За каждого друга ты получишь <b>+3 дня</b> просмотра."
+            "За каждого друга ты получишь <b>+3 дня</b> просмотра.\n\n"
+            "━━━━━━━━━━━━━━━\n"
+            "🏆 <b>Топ приглашающих:</b>\n" + "\n".join(lb_lines)
         )
 
         from bot.keyboards import back_kb
