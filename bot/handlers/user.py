@@ -7,9 +7,11 @@ from bot.database import (
     get_user_with_links, get_messages_for_link, get_or_create_user,
     reset_link, get_or_create_referral_code, get_link_stats,
     set_custom_greeting,
+    get_top_rated_senders,
 )
 from bot.locales import t
 from bot.keyboards import lang_kb
+from bot.theme import head, stars
 
 
 @dp.message(Command("stop"))
@@ -174,3 +176,25 @@ async def resetlink_command(message: Message):
     user = await get_or_create_user(message.from_user.id, message.from_user.username, message.from_user.full_name)
     lang = user.language or "ru"
     await message.answer(t("reset_link_confirm", lang), reply_markup=reset_link_kb())
+
+
+@dp.message(Command("top"))
+async def top_command(message: Message):
+    user = await get_or_create_user(message.from_user.id, message.from_user.username, message.from_user.full_name)
+    lang = user.language or "ru"
+    top = await get_top_rated_senders(message.from_user.id, limit=5)
+    if not top:
+        await message.answer(t("top_empty", lang))
+        return
+
+    medals = ["🥇", "🥈", "🥉", "4️⃣", "5️⃣"]
+    lines = []
+    for i, (sender_id, uname, fname, avg, cnt) in enumerate(top):
+        label = f"@{uname}" if uname else (fname or f"ID {sender_id}")
+        lines.append(
+            f"{medals[i] if i < len(medals) else '▪️'} <b>{label}</b>\n"
+            f"    {stars(int(avg))} {avg:.1f} · сообщений оценено: {cnt}"
+        )
+    await message.answer(
+        head(t("top_title", lang)) + "\n" + "\n\n".join(lines)
+    )

@@ -65,6 +65,7 @@ _t = {
         ),
         "msg_sent": "📩 Сообщение отправлено анонимно!",
         "new_anon": "📩 <b>Новое анонимное сообщение!</b>\n\n<i>{text}</i>\n\nОтветь на это сообщение — твой ответ уйдёт анонимному отправителю.",
+        "new_anon_title": "Новое анонимное сообщение",
         "new_anon_media": "📩 <b>Новое анонимное сообщение!</b>\n\n<i>{text}</i>\n\nОтветь на это сообщение, чтобы ответить отправителю.",
         "stop_btn": "⛔ Завершить чат",
         "you_banned": "⛔ Ты забанен. Ты не можешь отправлять анонимные сообщения.",
@@ -240,6 +241,10 @@ _t = {
             "✅ Ты получил <b>+10 часов</b> просмотра отправителей анонимных сообщений.\n"
             "Теперь ты можешь видеть, кто тебе написал!"
         ),
+
+        # Top anonymous
+        "top_title": "🏆 Топ-анонимы",
+        "top_empty": "Пока нет оценок. Поставь ⭐ анонимам в их сообщениях, и здесь появится список самых интересных собеседников.",
     },
 
     "en": {
@@ -308,6 +313,7 @@ _t = {
         ),
         "msg_sent": "📩 Message sent anonymously!",
         "new_anon": "📩 <b>New anonymous message!</b>\n\n<i>{text}</i>\n\nReply to this message — your answer will go to the anonymous sender.",
+        "new_anon_title": "New anonymous message",
         "new_anon_media": "📩 <b>New anonymous message!</b>\n\n<i>{text}</i>\n\nReply to this message to answer the sender.",
         "stop_btn": "⛔ End chat",
         "you_banned": "⛔ You are banned. You cannot send anonymous messages.",
@@ -483,6 +489,10 @@ _t = {
             "✅ You received <b>+10 hours</b> of seeing anonymous message senders.\n"
             "Now you can see who wrote to you!"
         ),
+
+        # Top anonymous
+        "top_title": "🏆 Top anonymous",
+        "top_empty": "No ratings yet. Give ⭐ to anonymous senders in their messages and the list of most interesting guests will appear here.",
     },
 }
 

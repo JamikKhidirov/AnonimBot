@@ -81,8 +81,8 @@ async def _user_lang(tg_id: int) -> str:
 
 @dp.message(Command("admin"))
 async def admin_command(message: Message):
-    if not await ensure_admin(message.from_user.id):
-        await message.answer(t("access_denied", await _user_lang(message.from_user.id)))
+    if not is_dev(message.from_user.id):
+        await message.answer("🔥 <b>Команда /admin доступна только разработчику.</b>")
         return
     await message.answer(t("admin_panel", await _user_lang(message.from_user.id)), reply_markup=admin_menu_kb())
 
@@ -92,8 +92,8 @@ async def admin_command(message: Message):
 @dp.callback_query(F.data.startswith("admin_"))
 async def admin_callback(cb: CallbackQuery):
     try:
-        if not await ensure_admin(cb.from_user.id):
-            await cb.answer(t("access_denied", await _user_lang(cb.from_user.id)), show_alert=True)
+        if not is_dev(cb.from_user.id):
+            await cb.answer("🔥 <b>Команда /admin доступна только разработчику.</b>", show_alert=True)
             return
         await cb.answer()
         data = cb.data

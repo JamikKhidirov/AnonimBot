@@ -21,6 +21,10 @@ from bot.database import (
 )
 from bot.locales import t
 from bot.keyboards import stop_session_kb
+from bot.theme import head, stars
+from bot.database import (
+    set_message_rating, get_message_owner,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -61,21 +65,35 @@ def _unsend_kb(lang: str, msg_id: int) -> InlineKeyboardMarkup:
     ])
 
 
+def _delivery_kb(msg_id: int, lang: str, whois: bool, rated: int = 0) -> InlineKeyboardMarkup:
+    rows = []
+    if whois:
+        rows.append([InlineKeyboardButton(
+            text=t("whois_btn", lang), callback_data=f"whois:{msg_id}",
+        )])
+    if rated:
+        rows.append([InlineKeyboardButton(
+            text=stars(rated), callback_data=f"rate:{msg_id}",
+        )])
+    else:
+        rows.append(
+            [InlineKeyboardButton(text=str(s), callback_data=f"rate:{msg_id}:{s}")
+             for s in range(1, 6)]
+        )
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
 async def _deliver_to_owner(plan: dict) -> list[tuple[int, int]]:
     """Sends anonymous content to the owner. Returns (bot_message_id, owner_tg_id) pairs."""
     owner_tg_id = plan["owner_id"]
     owner_lang = plan["owner_lang"]
     kind = plan["kind"]
 
-    whois_kb = None
-    if plan.get("whois"):
-        whois_kb = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text=t("whois_btn", owner_lang), callback_data=f"whois:{plan['msg_id']}")],
-        ])
+    kb = _delivery_kb(plan["msg_id"], owner_lang, bool(plan.get("whois")))
 
     if kind == "text":
-        body = t("new_anon", owner_lang).format(text=plan["text"])
-        sent = await bot.send_message(owner_tg_id, body, reply_markup=whois_kb)
+        body = head(t("new_anon_title", owner_lang)) + "\n\n" + plan["text"]
+        sent = await bot.send_message(owner_tg_id, body, reply_markup=kb)
         return [(sent.message_id, owner_tg_id)]
 
     if kind == "album":
@@ -86,14 +104,14 @@ async def _deliver_to_owner(plan: dict) -> list[tuple[int, int]]:
         sent_list = await bot.send_media_group(owner_tg_id, media_group)
         result = [(s.message_id, owner_tg_id) for s in sent_list]
         note = t("new_anon_media", owner_lang).format(text=plan.get("text") or "")
-        sent = await bot.send_message(owner_tg_id, note, reply_markup=whois_kb)
+        sent = await bot.send_message(owner_tg_id, note, reply_markup=kb)
         result.append((sent.message_id, owner_tg_id))
         return result
 
     media_copy = await plan["message_ref"].copy_to(owner_tg_id)
     result = [(media_copy.message_id, owner_tg_id)]
     note = t("new_anon_media", owner_lang).format(text=plan.get("text") or "")
-    sent = await bot.send_message(owner_tg_id, note, reply_markup=whois_kb)
+    sent = await bot.send_message(owner_tg_id, note, reply_markup=kb)
     result.append((sent.message_id, owner_tg_id))
     return result
 
@@ -333,6 +351,42 @@ async def unsend_callback(cb):
             await cb.message.edit_text(f"❌ Ошибка: {e}")
         except Exception:
             pass
+
+
+@dp.callback_query(F.data.startswith("rate:"))
+async def rate_callback(cb):
+    try:
+        parts = cb.data.split(":")
+        msg_id = int(parts[1])
+        msg = await get_message_by_id(msg_id)
+        if not msg:
+            await cb.answer("❌ Сообщение не найдено", show_alert=True)
+            return
+        owner_tg = await get_message_owner(msg_id)
+        if not owner_tg or owner_tg != cb.from_user.id:
+            await cb.answer("❌ Это не твоё сообщение", show_alert=True)
+            return
+
+        if len(parts) >= 3:
+            val = int(parts[2])
+            if 1 <= val <= 5:
+                await set_message_rating(msg_id, val)
+
+        rated = (await get_message_by_id(msg_id)).owner_rating or 0
+        link = await get_link_by_id(msg.link_id)
+        lang = (link.user.language if link and link.user else "ru") or "ru"
+        whois = bool(link and link.user and user_can_see_whois(link.user))
+
+        if rated:
+            await cb.answer(f"⭐ Оценка анонима: {stars(rated)}", show_alert=False)
+        else:
+            await cb.answer("⭐ Поставь оценку анониму")
+        try:
+            await cb.message.edit_reply_markup(reply_markup=_delivery_kb(msg_id, lang, whois, rated))
+        except Exception:
+            pass
+    except Exception as e:
+        logger.exception(f"rate_callback error: data={cb.data}")
 
 
 @dp.message(F.reply_to_message)

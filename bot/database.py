@@ -62,6 +62,7 @@ class Message(Base):
     text = Column(Text, nullable=True)
     content_type = Column(String(32), default="text")
     file_id = Column(String(512), nullable=True)
+    owner_rating = Column(Integer, default=0)
     created_at = Column(DateTime, default=datetime.utcnow)
 
     link = relationship("ChatLink", back_populates="messages")
@@ -222,6 +223,7 @@ async def init_db():
         ("users", "custom_greeting", "TEXT"),
         ("users", "ladder_rewarded", "INTEGER DEFAULT 0"),
         ("chat_links", "view_count", "INTEGER DEFAULT 0"),
+        ("messages", "owner_rating", "INTEGER DEFAULT 0"),
     ]
     for table, column, col_type in migrations:
         try:
@@ -496,6 +498,60 @@ async def get_sender_message_count(sender_id: int) -> int:
             select(func.count(Message.id)).where(Message.sender_id == sender_id)
         )
         return result.scalar()
+
+
+async def set_message_rating(message_id: int, stars: int):
+    """Owner rates an anonymous message 1-5 (stars capped, 0 resets)."""
+    stars = max(0, min(5, int(stars)))
+    async with async_session() as session:
+        result = await session.execute(select(Message).where(Message.id == message_id))
+        msg = result.scalar_one_or_none()
+        if msg:
+            msg.owner_rating = stars
+            await session.commit()
+
+
+async def get_message_owner(message_id: int) -> int | None:
+    """Returns the owner's telegram_id who owns this message, or None."""
+    async with async_session() as session:
+        result = await session.execute(
+            select(User.telegram_id)
+            .join(ChatLink, ChatLink.user_id == User.id)
+            .join(Message, Message.link_id == ChatLink.id)
+            .where(Message.id == message_id)
+        )
+        return result.scalar_one_or_none()
+
+
+async def get_top_rated_senders(
+    owner_tg_id: int, limit: int = 5
+) -> list[tuple[int, str | None, str | None, float, int]]:
+    """Most interesting anonymous guests for this owner, by average rating.
+
+    Returns (sender_id, latest username, latest full_name, avg_rating, rated_count).
+    Only senders with at least one rated message are included.
+    """
+    async with async_session() as session:
+        rated = (
+            select(
+                Message.sender_id,
+                func.max(Message.sender_username).label("uname"),
+                func.max(Message.sender_full_name).label("fname"),
+                func.avg(Message.owner_rating).label("avg_r"),
+                func.count(Message.id).label("cnt"),
+            )
+            .join(ChatLink, ChatLink.id == Message.link_id)
+            .join(User, User.id == ChatLink.user_id)
+            .where(User.telegram_id == owner_tg_id, Message.owner_rating > 0)
+            .group_by(Message.sender_id)
+            .order_by(text("avg_r DESC"), text("cnt DESC"))
+            .limit(limit)
+        )
+        rows = (await session.execute(rated)).all()
+        return [
+            (r[0], r[1], r[2], round(float(r[3]), 1), r[4])
+            for r in rows
+        ]
 
 
 async def set_active_session(telegram_id: int, link_code: str):

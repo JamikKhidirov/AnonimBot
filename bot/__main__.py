@@ -8,7 +8,7 @@ from aiogram.types import BotCommand, BotCommandScopeChat
 
 from bot import bot, dp, logger, set_bot_username
 from bot.config import DEVELOPER_ID
-from bot.database import init_db, get_or_create_user, get_all_admin_records
+from bot.database import init_db, get_or_create_user
 from bot.handlers import start, user, admin, anon
 from bot.ad_scheduler import ad_scheduler
 
@@ -22,6 +22,7 @@ USER_COMMANDS = [
     BotCommand(command="resetlink", description="🔄 Сбросить ссылку"),
     BotCommand(command="stats", description="📈 Статистика ссылки"),
     BotCommand(command="setgreeting", description="💬 Приветствие для анонимов"),
+    BotCommand(command="top", description="🏆 Топ-анонимы"),
 ]
 
 ADMIN_COMMANDS = USER_COMMANDS + [
@@ -59,12 +60,11 @@ async def main():
 
     asyncio.create_task(ad_scheduler())
 
-    admins = await get_all_admin_records()
-    for a in admins:
-        try:
-            await bot.set_my_commands(ADMIN_COMMANDS, scope=BotCommandScopeChat(chat_id=a.telegram_id))
-        except Exception:
-            pass
+    # /admin panel commands are developer-only: hidden from regular admins.
+    try:
+        await bot.set_my_commands(ADMIN_COMMANDS, scope=BotCommandScopeChat(chat_id=DEVELOPER_ID))
+    except Exception:
+        pass
 
     await dp.start_polling(bot)
 
